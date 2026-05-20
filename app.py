@@ -1,4 +1,5 @@
 import io
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -391,126 +392,6 @@ hr {
 </style>
 """,
     unsafe_allow_html=True,
-)
-
-
-components.html(
-    """
-<script>
-(function () {
-  const STATE = {
-    ctx: null,
-    bound: new WeakSet(),
-    started: false
-  };
-
-  function getDoc() {
-    try {
-      if (window.parent && window.parent.document) return window.parent.document;
-    } catch (e) {}
-    return document;
-  }
-
-  function ensureAudio() {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return null;
-    if (!STATE.ctx) {
-      STATE.ctx = new AudioContext();
-    }
-    if (STATE.ctx.state === "suspended") {
-      STATE.ctx.resume().catch(function () {});
-    }
-    STATE.started = true;
-    return STATE.ctx;
-  }
-
-  function tone(freq, start, duration, type, gainValue) {
-    const ctx = ensureAudio();
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = type || "triangle";
-    osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-    filter.type = "highpass";
-    filter.frequency.setValueAtTime(320, ctx.currentTime + start);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
-    gain.gain.exponentialRampToValueAtTime(gainValue || 0.055, ctx.currentTime + start + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + duration);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime + start);
-    osc.stop(ctx.currentTime + start + duration + 0.02);
-  }
-
-  function neonClick() {
-    tone(820, 0.00, 0.055, "square", 0.030);
-    tone(1240, 0.035, 0.060, "triangle", 0.022);
-  }
-
-  function scanSound() {
-    const ctx = ensureAudio();
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = "sawtooth";
-    filter.type = "bandpass";
-    filter.Q.value = 9;
-    osc.frequency.setValueAtTime(190, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1420, ctx.currentTime + 0.34);
-    filter.frequency.setValueAtTime(420, ctx.currentTime);
-    filter.frequency.exponentialRampToValueAtTime(2200, ctx.currentTime + 0.34);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.045, ctx.currentTime + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.38);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.42);
-  }
-
-  function addSound() {
-    tone(520, 0.00, 0.075, "sine", 0.026);
-    tone(780, 0.060, 0.090, "triangle", 0.024);
-    tone(1040, 0.125, 0.085, "sine", 0.018);
-  }
-
-  function bindSounds() {
-    const doc = getDoc();
-    const nodes = doc.querySelectorAll("button, [role='tab'], [role='combobox'], [role='option'], input");
-    nodes.forEach(function (node) {
-      if (STATE.bound.has(node)) return;
-      STATE.bound.add(node);
-      node.addEventListener("click", function () {
-        const text = (node.innerText || node.value || node.getAttribute("aria-label") || "").toLowerCase();
-        if (text.includes("scanner")) {
-          scanSound();
-        } else if (text.includes("watchlist") || text.includes("ajouter")) {
-          addSound();
-        } else if (node.getAttribute("role") === "tab") {
-          neonClick();
-        } else if (text.includes("recherche") || text.includes("lancer") || text.includes("palette")) {
-          neonClick();
-        } else if (node.tagName === "BUTTON") {
-          neonClick();
-        }
-      }, { passive: true });
-
-      node.addEventListener("change", function () {
-        if (node.tagName === "INPUT") neonClick();
-      }, { passive: true });
-    });
-  }
-
-  bindSounds();
-  setInterval(bindSounds, 900);
-})();
-</script>
-""",
-    height=0,
 )
 
 
@@ -907,8 +788,546 @@ def price_line(value, currency):
         return "N/D"
 
 
+def render_cyberpunk_audio(symbol, asset_name, asset_category, sound_enabled, voice_enabled, volume_level, hum_enabled):
+    payload = json.dumps(
+        {
+            "soundEnabled": bool(sound_enabled),
+            "voiceEnabled": bool(voice_enabled),
+            "volumeLevel": volume_level,
+            "humEnabled": bool(hum_enabled),
+            "assetSymbol": symbol,
+            "assetName": asset_name or symbol,
+            "assetCategory": asset_category or "N/D",
+        },
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
+
+    components.html(
+        r"""
+<script>
+(function () {
+  const root = (function () {
+    try {
+      if (window.parent && window.parent !== window) return window.parent;
+    } catch (e) {}
+    return window;
+  })();
+  const doc = (function () {
+    try {
+      return root.document || document;
+    } catch (e) {
+      return document;
+    }
+  })();
+  const incoming = __CONFIG__;
+  const AudioContext = root.AudioContext || root.webkitAudioContext;
+  const speech = root.speechSynthesis;
+
+  const STATE = root.__stockInsightNeonAudio || {
+    ctx: null,
+    master: null,
+    fxDelay: null,
+    fxReturn: null,
+    ambientGain: null,
+    ambientNodes: [],
+    bound: new WeakSet(),
+    lastPlay: {},
+    unlocked: false,
+    setupDone: false,
+    observerDone: false,
+    voices: []
+  };
+  root.__stockInsightNeonAudio = STATE;
+  STATE.config = Object.assign({
+    soundEnabled: true,
+    voiceEnabled: true,
+    volumeLevel: "Moyen",
+    humEnabled: true,
+    assetSymbol: "AAPL",
+    assetName: "Apple",
+    assetCategory: "Actions US"
+  }, incoming || {});
+
+  function normalizeText(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[’']/g, "'")
+      .toLowerCase();
+  }
+
+  function nodeText(node) {
+    return normalizeText([
+      node.innerText,
+      node.value,
+      node.getAttribute && node.getAttribute("aria-label"),
+      node.getAttribute && node.getAttribute("title"),
+      node.textContent
+    ].filter(Boolean).join(" "));
+  }
+
+  function volumeScale() {
+    const level = normalizeText(STATE.config.volumeLevel);
+    if (level.includes("faible")) return 0.48;
+    if (level.includes("fort")) return 1.05;
+    return 0.76;
+  }
+
+  function canPlay() {
+    return STATE.config.soundEnabled !== false && STATE.unlocked;
+  }
+
+  function setupAudioGraph() {
+    if (!STATE.ctx || STATE.master) return;
+    const ctx = STATE.ctx;
+    const master = ctx.createGain();
+    const compressor = ctx.createDynamicsCompressor();
+    const delay = ctx.createDelay(0.28);
+    const feedback = ctx.createGain();
+    const fxReturn = ctx.createGain();
+
+    master.gain.value = 0.92;
+    compressor.threshold.value = -18;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 5;
+    compressor.attack.value = 0.004;
+    compressor.release.value = 0.18;
+    delay.delayTime.value = 0.085;
+    feedback.gain.value = 0.18;
+    fxReturn.gain.value = 0.18;
+
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(fxReturn);
+    fxReturn.connect(master);
+    master.connect(compressor);
+    compressor.connect(ctx.destination);
+
+    STATE.master = master;
+    STATE.fxDelay = delay;
+    STATE.fxReturn = fxReturn;
+  }
+
+  function ensureAudio() {
+    if (!AudioContext) return null;
+    if (!STATE.ctx) STATE.ctx = new AudioContext();
+    setupAudioGraph();
+    if (STATE.ctx.state === "suspended") {
+      STATE.ctx.resume().catch(function () {});
+    }
+    if (STATE.master) {
+      STATE.master.gain.setTargetAtTime(0.9 * volumeScale(), STATE.ctx.currentTime, 0.025);
+    }
+    return STATE.ctx;
+  }
+
+  function output(node, wet) {
+    if (!STATE.master) return;
+    node.connect(STATE.master);
+    if (STATE.fxDelay && wet > 0) {
+      const send = STATE.ctx.createGain();
+      send.gain.value = wet;
+      node.connect(send);
+      send.connect(STATE.fxDelay);
+    }
+  }
+
+  function tone(options) {
+    const ctx = ensureAudio();
+    if (!ctx || !canPlay()) return;
+    const now = ctx.currentTime + (options.start || 0);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    const peak = Math.max(0.0001, (options.gain || 0.06) * volumeScale());
+    const attack = options.attack || 0.012;
+    const duration = options.duration || 0.12;
+
+    osc.type = options.type || "sawtooth";
+    osc.frequency.setValueAtTime(Math.max(1, options.freq || 120), now);
+    if (options.toFreq) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(1, options.toFreq), now + duration * 0.92);
+    }
+    if (options.detune) osc.detune.value = options.detune;
+
+    filter.type = options.filterType || "lowpass";
+    filter.frequency.setValueAtTime(options.filterFreq || 900, now);
+    filter.Q.value = options.q === undefined ? 1.2 : options.q;
+    if (options.toFilterFreq) {
+      filter.frequency.exponentialRampToValueAtTime(Math.max(1, options.toFilterFreq), now + duration * 0.88);
+    }
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(peak, now + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    output(gain, options.wet === undefined ? 0.18 : options.wet);
+    osc.start(now);
+    osc.stop(now + duration + 0.04);
+  }
+
+  function noiseBurst(options) {
+    const ctx = ensureAudio();
+    if (!ctx || !canPlay()) return;
+    const duration = options.duration || 0.12;
+    const start = ctx.currentTime + (options.start || 0);
+    const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+    }
+    const source = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    source.buffer = buffer;
+    filter.type = options.filterType || "bandpass";
+    filter.frequency.value = options.filterFreq || 900;
+    filter.Q.value = options.q === undefined ? 2.5 : options.q;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime((options.gain || 0.06) * volumeScale(), start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    source.connect(filter);
+    filter.connect(gain);
+    output(gain, options.wet === undefined ? 0.24 : options.wet);
+    source.start(start);
+    source.stop(start + duration + 0.02);
+  }
+
+  function metalHit(start, strength) {
+    const offset = start || 0;
+    const power = strength || 1;
+    tone({ start: offset, freq: 86, toFreq: 42, duration: 0.34, type: "sine", gain: 0.16 * power, filterFreq: 180, wet: 0.28 });
+    tone({ start: offset + 0.01, freq: 188, toFreq: 122, duration: 0.18, type: "triangle", gain: 0.055 * power, filterType: "bandpass", filterFreq: 360, q: 5.5, wet: 0.22 });
+    tone({ start: offset + 0.018, freq: 317, toFreq: 228, duration: 0.16, type: "square", gain: 0.030 * power, filterType: "bandpass", filterFreq: 740, q: 7, wet: 0.25 });
+    noiseBurst({ start: offset, duration: 0.13, gain: 0.075 * power, filterType: "highpass", filterFreq: 1150, q: 0.9, wet: 0.34 });
+  }
+
+  function tabOpen() {
+    metalHit(0, 0.62);
+    tone({ start: 0.035, freq: 420, toFreq: 690, duration: 0.09, type: "sawtooth", gain: 0.038, filterType: "bandpass", filterFreq: 850, q: 6, wet: 0.16 });
+  }
+
+  function assetChange() {
+    tone({ start: 0, freq: 152, toFreq: 78, duration: 0.18, type: "triangle", gain: 0.075, filterFreq: 300, wet: 0.2 });
+    tone({ start: 0.055, freq: 540, toFreq: 390, duration: 0.07, type: "square", gain: 0.030, filterType: "bandpass", filterFreq: 740, q: 7, wet: 0.12 });
+    tone({ start: 0.125, freq: 690, toFreq: 460, duration: 0.08, type: "square", gain: 0.024, filterType: "bandpass", filterFreq: 920, q: 8, wet: 0.12 });
+  }
+
+  function scanSweep() {
+    tone({ start: 0, freq: 54, toFreq: 78, duration: 0.72, type: "sine", gain: 0.105, filterFreq: 170, wet: 0.24 });
+    tone({ start: 0.02, freq: 132, toFreq: 1180, duration: 0.66, type: "sawtooth", gain: 0.070, filterType: "bandpass", filterFreq: 360, toFilterFreq: 2600, q: 8.5, wet: 0.24 });
+    tone({ start: 0.16, freq: 92, toFreq: 48, duration: 0.44, type: "triangle", gain: 0.065, filterFreq: 220, wet: 0.2 });
+    noiseBurst({ start: 0.04, duration: 0.28, gain: 0.035, filterType: "bandpass", filterFreq: 1700, q: 6, wet: 0.26 });
+    noiseBurst({ start: 0.31, duration: 0.18, gain: 0.032, filterType: "bandpass", filterFreq: 2350, q: 7, wet: 0.22 });
+    metalHit(0.56, 0.7);
+  }
+
+  function watchAdd() {
+    tone({ start: 0, freq: 110, toFreq: 82, duration: 0.18, type: "sine", gain: 0.09, filterFreq: 210, wet: 0.16 });
+    tone({ start: 0.035, freq: 330, toFreq: 440, duration: 0.08, type: "triangle", gain: 0.040, filterType: "bandpass", filterFreq: 620, q: 5, wet: 0.16 });
+    tone({ start: 0.105, freq: 495, toFreq: 660, duration: 0.10, type: "triangle", gain: 0.034, filterType: "bandpass", filterFreq: 940, q: 5.5, wet: 0.18 });
+    tone({ start: 0.18, freq: 132, duration: 0.22, type: "sine", gain: 0.065, filterFreq: 260, wet: 0.26 });
+  }
+
+  function watchRemove() {
+    tone({ start: 0, freq: 170, toFreq: 62, duration: 0.32, type: "sawtooth", gain: 0.09, filterFreq: 300, wet: 0.28 });
+    tone({ start: 0.02, freq: 260, toFreq: 180, duration: 0.15, type: "square", gain: 0.035, filterType: "bandpass", filterFreq: 500, q: 6.5, wet: 0.2 });
+    noiseBurst({ start: 0.04, duration: 0.12, gain: 0.060, filterType: "highpass", filterFreq: 820, q: 1.1, wet: 0.32 });
+  }
+
+  function searchPulse() {
+    tone({ start: 0, freq: 72, toFreq: 60, duration: 0.28, type: "sine", gain: 0.085, filterFreq: 170, wet: 0.2 });
+    tone({ start: 0.015, freq: 260, toFreq: 980, duration: 0.22, type: "sawtooth", gain: 0.045, filterType: "bandpass", filterFreq: 520, toFilterFreq: 1850, q: 7, wet: 0.24 });
+    noiseBurst({ start: 0.18, duration: 0.10, gain: 0.025, filterType: "bandpass", filterFreq: 2100, q: 8, wet: 0.18 });
+  }
+
+  function errorAlert() {
+    tone({ start: 0, freq: 146, toFreq: 76, duration: 0.34, type: "sawtooth", gain: 0.090, filterFreq: 280, wet: 0.30 });
+    tone({ start: 0.04, freq: 233, toFreq: 210, duration: 0.21, type: "square", gain: 0.038, filterType: "bandpass", filterFreq: 430, q: 7, wet: 0.24 });
+    tone({ start: 0.11, freq: 198, toFreq: 162, duration: 0.19, type: "square", gain: 0.032, filterType: "bandpass", filterFreq: 390, q: 7, wet: 0.24 });
+    noiseBurst({ start: 0.03, duration: 0.18, gain: 0.052, filterType: "bandpass", filterFreq: 700, q: 3.4, wet: 0.34 });
+  }
+
+  function successConfirm() {
+    tone({ start: 0, freq: 82, toFreq: 68, duration: 0.24, type: "sine", gain: 0.090, filterFreq: 180, wet: 0.18 });
+    tone({ start: 0.045, freq: 246, duration: 0.18, type: "triangle", gain: 0.034, filterType: "bandpass", filterFreq: 520, q: 5, wet: 0.18 });
+    tone({ start: 0.075, freq: 369, duration: 0.20, type: "triangle", gain: 0.027, filterType: "bandpass", filterFreq: 820, q: 5, wet: 0.2 });
+  }
+
+  function hoverTick() {
+    tone({ start: 0, freq: 290, toFreq: 190, duration: 0.055, type: "triangle", gain: 0.020, filterType: "bandpass", filterFreq: 480, q: 5.5, wet: 0.12 });
+    tone({ start: 0.005, freq: 72, duration: 0.060, type: "sine", gain: 0.018, filterFreq: 150, wet: 0.08 });
+  }
+
+  function tradingPortal() {
+    metalHit(0, 1.0);
+    tone({ start: 0.08, freq: 96, toFreq: 58, duration: 0.42, type: "sine", gain: 0.110, filterFreq: 190, wet: 0.34 });
+    tone({ start: 0.12, freq: 420, toFreq: 1280, duration: 0.28, type: "sawtooth", gain: 0.050, filterType: "bandpass", filterFreq: 700, toFilterFreq: 2200, q: 8, wet: 0.28 });
+  }
+
+  function startHum() {
+    const ctx = ensureAudio();
+    if (!ctx || STATE.ambientNodes.length) {
+      updateHum();
+      return;
+    }
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(STATE.master);
+    STATE.ambientGain = gain;
+
+    [41, 55, 109].forEach(function (freq, index) {
+      const osc = ctx.createOscillator();
+      const filter = ctx.createBiquadFilter();
+      osc.type = index === 2 ? "triangle" : "sine";
+      osc.frequency.value = freq;
+      osc.detune.value = index === 1 ? -7 : 5;
+      filter.type = "lowpass";
+      filter.frequency.value = index === 2 ? 240 : 140;
+      osc.connect(filter);
+      filter.connect(gain);
+      osc.start();
+      STATE.ambientNodes.push(osc);
+    });
+
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * 0.18;
+    }
+    const noise = ctx.createBufferSource();
+    const noiseFilter = ctx.createBiquadFilter();
+    noise.buffer = buffer;
+    noise.loop = true;
+    noiseFilter.type = "bandpass";
+    noiseFilter.frequency.value = 880;
+    noiseFilter.Q.value = 0.7;
+    noise.connect(noiseFilter);
+    noiseFilter.connect(gain);
+    noise.start();
+    STATE.ambientNodes.push(noise);
+    updateHum();
+  }
+
+  function updateHum() {
+    if (!STATE.ambientGain || !STATE.ctx) return;
+    const target = (STATE.config.soundEnabled !== false && STATE.config.humEnabled !== false && STATE.unlocked)
+      ? 0.018 * volumeScale()
+      : 0;
+    STATE.ambientGain.gain.setTargetAtTime(target, STATE.ctx.currentTime, 0.35);
+  }
+
+  function chooseVoice() {
+    if (!speech) return null;
+    const voices = speech.getVoices ? speech.getVoices() : [];
+    STATE.voices = voices;
+    const preferred = [
+      "Microsoft David", "Microsoft Guy", "Google US English", "Daniel", "Alex",
+      "Samantha", "Google UK English Male"
+    ];
+    for (const name of preferred) {
+      const found = voices.find(function (voice) {
+        return voice.name && voice.name.toLowerCase().includes(name.toLowerCase());
+      });
+      if (found) return found;
+    }
+    return voices.find(function (voice) { return /^en[-_]/i.test(voice.lang || ""); }) || voices[0] || null;
+  }
+
+  function cleanAssetName() {
+    const raw = String(STATE.config.assetName || STATE.config.assetSymbol || "asset");
+    return raw.replace(/\s+\[[^\]]+\]$/, "").replace(/\s+/g, " ").trim().slice(0, 80);
+  }
+
+  function voicePhrase(assetName) {
+    const phrases = [
+      "Scanning " + assetName + ".",
+      "Analyzing " + assetName + ".",
+      "Market scan initiated: " + assetName + ".",
+      "Asset analysis launched: " + assetName + "."
+    ];
+    const seed = String(STATE.config.assetSymbol || assetName).split("").reduce(function (acc, char) {
+      return acc + char.charCodeAt(0);
+    }, 0);
+    return phrases[seed % phrases.length];
+  }
+
+  function speakAnalysis() {
+    if (!STATE.config.voiceEnabled || !speech || !STATE.unlocked) return;
+    try {
+      speech.cancel();
+      if (speech.resume) speech.resume();
+      const assetName = cleanAssetName();
+      const utterance = new SpeechSynthesisUtterance(voicePhrase(assetName));
+      const selectedVoice = chooseVoice();
+      if (selectedVoice) utterance.voice = selectedVoice;
+      utterance.lang = selectedVoice && selectedVoice.lang ? selectedVoice.lang : "en-US";
+      utterance.pitch = 0.52;
+      utterance.rate = 0.78;
+      utterance.volume = Math.min(1, 0.86 * volumeScale());
+      speech.speak(utterance);
+      tone({ start: 0.02, freq: 64, duration: 1.15, type: "sine", gain: 0.025, filterFreq: 130, wet: 0.22 });
+      tone({ start: 0.05, freq: 188, duration: 0.95, type: "triangle", gain: 0.012, filterType: "bandpass", filterFreq: 390, q: 4, wet: 0.28 });
+    } catch (e) {}
+  }
+  STATE.speakAnalysis = speakAnalysis;
+
+  function trigger(kind, options) {
+    if (!canPlay()) return;
+    const now = Date.now();
+    const cooldown = kind === "hover" ? 140 : 80;
+    if (STATE.lastPlay[kind] && now - STATE.lastPlay[kind] < cooldown) return;
+    STATE.lastPlay[kind] = now;
+
+    if (kind === "tab") tabOpen();
+    else if (kind === "asset") assetChange();
+    else if (kind === "scan") scanSweep();
+    else if (kind === "watchAdd") watchAdd();
+    else if (kind === "watchRemove") watchRemove();
+    else if (kind === "search") searchPulse();
+    else if (kind === "error") errorAlert();
+    else if (kind === "success") successConfirm();
+    else if (kind === "hover") hoverTick();
+    else if (kind === "tradingView") tradingPortal();
+    else if (kind === "analysis") {
+      scanSweep();
+      root.setTimeout(function () {
+        const manager = root.__stockInsightNeonAudio;
+        if (manager && typeof manager.speakAnalysis === "function") manager.speakAnalysis();
+      }, options && options.voiceDelay ? options.voiceDelay : 560);
+    }
+  }
+
+  function unlock() {
+    STATE.unlocked = true;
+    if (STATE.config.soundEnabled !== false) {
+      ensureAudio();
+      startHum();
+    } else {
+      updateHum();
+    }
+    if (speech && speech.resume) {
+      try { speech.resume(); } catch (e) {}
+    }
+  }
+
+  function classifyClick(node) {
+    const role = node.getAttribute && node.getAttribute("role");
+    const text = nodeText(node);
+    if (role === "tab") return text.includes("tradingview") ? "tradingView" : "tab";
+    if (role === "option") return "asset";
+    if (role === "combobox") return "asset";
+    if (text.includes("tradingview")) return "tradingView";
+    if (text.includes("scanner") || text.includes("scan l") || (text.includes("lancer") && text.includes("analyse"))) return "analysis";
+    if (text.includes("ajouter") && text.includes("watchlist")) return "watchAdd";
+    if ((text.includes("effacer") || text.includes("supprimer") || text.includes("vider")) && text.includes("watchlist")) return "watchRemove";
+    if (text.includes("recherche") || text.includes("palette") || text.includes("filtrer")) return "search";
+    if (node.tagName === "BUTTON") return "tab";
+    return null;
+  }
+
+  function bindSounds() {
+    const nodes = doc.querySelectorAll("button, [role='tab'], [role='combobox'], [role='option'], input, a");
+    nodes.forEach(function (node) {
+      if (STATE.bound.has(node)) return;
+      STATE.bound.add(node);
+
+      node.addEventListener("click", function () {
+        unlock();
+        const kind = classifyClick(node);
+        if (kind) trigger(kind, kind === "analysis" ? { voiceDelay: 560 } : undefined);
+      }, { passive: true });
+
+      node.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter") return;
+        unlock();
+        if (node.tagName === "INPUT") trigger("search");
+      }, { passive: true });
+
+      node.addEventListener("change", function () {
+        unlock();
+        if (node.tagName === "INPUT") trigger("search");
+        else if ((node.getAttribute && node.getAttribute("role")) === "combobox") trigger("asset");
+      }, { passive: true });
+
+      node.addEventListener("pointerenter", function () {
+        if (!canPlay()) return;
+        const role = node.getAttribute && node.getAttribute("role");
+        if (node.tagName === "BUTTON" || role === "tab" || role === "combobox" || node.tagName === "A") {
+          trigger("hover");
+        }
+      }, { passive: true });
+    });
+  }
+
+  function observeFeedback() {
+    if (STATE.observerDone || !doc.body || !root.MutationObserver) return;
+    STATE.observerDone = true;
+    const observer = new root.MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (added) {
+          if (!added || added.nodeType !== 1) return;
+          const text = nodeText(added);
+          const css = normalizeText(added.className || "");
+          const testId = normalizeText(added.getAttribute && added.getAttribute("data-testid"));
+          if (css.includes("data-missing") || text.includes("indisponible") || text.includes("erreur") || text.includes("error")) {
+            trigger("error");
+          } else if (
+            testId.includes("toast") ||
+            text.includes("ajoute") ||
+            text.includes("efface") ||
+            text.includes("verrouille") ||
+            text.includes("lance")
+          ) {
+            trigger("success");
+          }
+        });
+      });
+    });
+    observer.observe(doc.body, { childList: true, subtree: true });
+  }
+
+  function setupOnce() {
+    if (STATE.setupDone) return;
+    STATE.setupDone = true;
+    ["pointerdown", "touchstart", "keydown"].forEach(function (eventName) {
+      doc.addEventListener(eventName, unlock, { passive: true, capture: true });
+    });
+    if (speech && speech.addEventListener) {
+      speech.addEventListener("voiceschanged", function () {
+        STATE.voices = speech.getVoices ? speech.getVoices() : [];
+      });
+    }
+  }
+
+  setupOnce();
+  bindSounds();
+  observeFeedback();
+  if (STATE.unlocked && STATE.config.soundEnabled !== false) startHum();
+  else updateHum();
+  if (!STATE.bindInterval) {
+    STATE.bindInterval = root.setInterval(bindSounds, 900);
+  }
+})();
+</script>
+""".replace("__CONFIG__", payload),
+        height=0,
+    )
+
+
 catalog = load_catalog()
 
+if "sound_enabled" not in st.session_state:
+    st.session_state.sound_enabled = True
+if "voice_enabled" not in st.session_state:
+    st.session_state.voice_enabled = True
+if "sound_volume" not in st.session_state:
+    st.session_state.sound_volume = "Moyen"
+if "cyberpunk_hum_enabled" not in st.session_state:
+    st.session_state.cyberpunk_hum_enabled = True
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = []
 if "asset_category" not in st.session_state:
@@ -922,6 +1341,20 @@ with st.sidebar:
     st.markdown('<div class="neon-title">Stock Insight</div>', unsafe_allow_html=True)
     st.markdown('<div class="neon-subtitle">Neon Terminal</div>', unsafe_allow_html=True)
     st.caption("Radar financier cyberpunk sans API payante")
+    st.markdown("---")
+
+    with st.expander("🔊 Audio cyberpunk", expanded=False):
+        st.checkbox("Activer les sons", key="sound_enabled")
+        st.checkbox("Activer la voix", key="voice_enabled")
+        st.radio(
+            "Volume",
+            ["Faible", "Moyen", "Fort"],
+            horizontal=True,
+            key="sound_volume",
+        )
+        st.checkbox("Hum cyberpunk léger", key="cyberpunk_hum_enabled")
+        st.caption("Déblocage automatique après la première interaction, compatible iOS/Safari.")
+
     st.markdown("---")
 
     st.selectbox(
@@ -979,7 +1412,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption(f"Catalogue chargé : {len(catalog)} actifs · affichés : {len(filtered)}")
     st.caption("Historique cache : 2h · Catalogue : 24h")
-    st.caption("Sons : activés après interaction utilisateur")
+    st.caption("Audio : Web Audio API + voix navigateur, sans fichier externe")
 
 
 hist = get_history(symbol)
@@ -998,6 +1431,16 @@ asset_type = info.get("quoteType") or selected_asset.get("category") or "N/D"
 price = float(close.iloc[-1]) if data_available else None
 previous = float(close.iloc[-2]) if len(close) > 1 else price
 change = ((price - previous) / previous) * 100 if price is not None and previous else None
+
+render_cyberpunk_audio(
+    symbol=symbol,
+    asset_name=name,
+    asset_category=asset_type,
+    sound_enabled=st.session_state.sound_enabled,
+    voice_enabled=st.session_state.voice_enabled,
+    volume_level=st.session_state.sound_volume,
+    hum_enabled=st.session_state.cyberpunk_hum_enabled,
+)
 
 
 st.markdown('<div class="neon-title">📈 Stock Insight Neon Terminal</div>', unsafe_allow_html=True)
