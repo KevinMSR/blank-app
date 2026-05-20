@@ -512,7 +512,7 @@ def render_analysis_audio_layer(asset_name, symbol):
   }
 
   function masterTargetGain() {
-    return 0.034 * volumeMultiplier();
+    return 0.042 * volumeMultiplier();
   }
 
   function applyVolume(seconds) {
@@ -604,10 +604,15 @@ def render_analysis_audio_layer(asset_name, symbol):
     if (!ctx || !STATE.enabled || STATE.ambient) return;
 
     const now = ctx.currentTime;
+    const tempo = 76;
+    const beat = 60 / tempo;
+    const bar = beat * 4;
+    const cycle = bar * 2;
     const master = ctx.createGain();
     const compressor = ctx.createDynamicsCompressor();
     const ambienceBus = ctx.createGain();
     const bassGain = ctx.createGain();
+    const rhythmBus = ctx.createGain();
     const padBus = ctx.createGain();
     const textureBus = ctx.createGain();
     const effectsInput = ctx.createGain();
@@ -615,35 +620,59 @@ def render_analysis_audio_layer(asset_name, symbol):
     const convolver = ctx.createConvolver();
     const reverbFilter = ctx.createBiquadFilter();
     const reverbGain = ctx.createGain();
+    const delaySend = ctx.createGain();
+    const delay = ctx.createDelay(2.4);
+    const delayFilter = ctx.createBiquadFilter();
+    const delayFeedback = ctx.createGain();
+    const delayGain = ctx.createGain();
     const nodes = [];
+    const timers = [];
 
     master.gain.setValueAtTime(0.0001, now);
-    master.gain.linearRampToValueAtTime(masterTargetGain(), now + 1.8);
-    ambienceBus.gain.setValueAtTime(0.72, now);
-    bassGain.gain.setValueAtTime(1, now);
-    padBus.gain.setValueAtTime(0.72, now);
-    textureBus.gain.setValueAtTime(0.46, now);
-    effectsInput.gain.setValueAtTime(0.9, now);
-    reverbSend.gain.setValueAtTime(0.18, now);
-    reverbGain.gain.setValueAtTime(0.22, now);
+    master.gain.linearRampToValueAtTime(masterTargetGain(), now + 2.4);
+    ambienceBus.gain.setValueAtTime(0.82, now);
+    bassGain.gain.setValueAtTime(0.96, now);
+    rhythmBus.gain.setValueAtTime(0.64, now);
+    padBus.gain.setValueAtTime(0.50, now);
+    textureBus.gain.setValueAtTime(0.36, now);
+    effectsInput.gain.setValueAtTime(0.78, now);
+    reverbSend.gain.setValueAtTime(0.13, now);
+    reverbGain.gain.setValueAtTime(0.20, now);
+    delaySend.gain.setValueAtTime(0.18, now);
+    delay.delayTime.setValueAtTime(beat * 0.75, now);
+    delayFeedback.gain.setValueAtTime(0.24, now);
+    delayGain.gain.setValueAtTime(0.17, now);
 
-    compressor.threshold.setValueAtTime(-28, now);
-    compressor.knee.setValueAtTime(20, now);
-    compressor.ratio.setValueAtTime(3.2, now);
-    compressor.attack.setValueAtTime(0.028, now);
-    compressor.release.setValueAtTime(0.58, now);
-    convolver.buffer = makeMetallicImpulse(1.65);
+    compressor.threshold.setValueAtTime(-25, now);
+    compressor.knee.setValueAtTime(16, now);
+    compressor.ratio.setValueAtTime(3.4, now);
+    compressor.attack.setValueAtTime(0.018, now);
+    compressor.release.setValueAtTime(0.46, now);
+    convolver.buffer = makeMetallicImpulse(1.9);
     reverbFilter.type = "bandpass";
-    reverbFilter.frequency.setValueAtTime(860, now);
-    reverbFilter.Q.setValueAtTime(1.7, now);
+    reverbFilter.frequency.setValueAtTime(720, now);
+    reverbFilter.Q.setValueAtTime(1.25, now);
+    delayFilter.type = "lowpass";
+    delayFilter.frequency.setValueAtTime(1280, now);
+    delayFilter.Q.setValueAtTime(0.8, now);
 
     bassGain.connect(ambienceBus);
+    rhythmBus.connect(ambienceBus);
     padBus.connect(ambienceBus);
     textureBus.connect(ambienceBus);
     ambienceBus.connect(compressor);
     ambienceBus.connect(reverbSend);
+    padBus.connect(delaySend);
+    textureBus.connect(delaySend);
     effectsInput.connect(compressor);
     effectsInput.connect(reverbSend);
+    effectsInput.connect(delaySend);
+    delaySend.connect(delay);
+    delay.connect(delayFilter);
+    delayFilter.connect(delayFeedback);
+    delayFeedback.connect(delay);
+    delayFilter.connect(delayGain);
+    delayGain.connect(compressor);
     reverbSend.connect(convolver);
     convolver.connect(reverbFilter);
     reverbFilter.connect(reverbGain);
@@ -651,127 +680,302 @@ def render_analysis_audio_layer(asset_name, symbol):
     compressor.connect(master);
     master.connect(ctx.destination);
 
-    nodes.push(makeOsc("sine", 28, 0.44, bassGain));
-    nodes.push(makeOsc("triangle", 41, 0.11, bassGain));
-    nodes.push(makeOsc("sawtooth", 54, 0.026, bassGain));
+    function rememberInterval(handler, milliseconds) {
+      const id = rootWindow.setInterval(handler, milliseconds);
+      timers.push({ type: "interval", id: id });
+      return id;
+    }
 
-    const bassBreath = ctx.createOscillator();
-    const bassDepth = ctx.createGain();
-    bassBreath.type = "sine";
-    bassBreath.frequency.setValueAtTime(0.19, now);
-    bassDepth.gain.setValueAtTime(0.12, now);
-    bassBreath.connect(bassDepth);
-    bassDepth.connect(bassGain.gain);
-    bassBreath.start();
-    nodes.push({ osc: bassBreath, gain: bassDepth });
+    function rememberTimeout(handler, milliseconds) {
+      const id = rootWindow.setTimeout(handler, milliseconds);
+      timers.push({ type: "timeout", id: id });
+      return id;
+    }
 
-    [
-      { type: "sawtooth", freq: 65.4, detune: -9, gain: 0.020, pan: -0.45 },
-      { type: "sawtooth", freq: 98.1, detune: 7, gain: 0.016, pan: 0.42 },
-      { type: "triangle", freq: 130.8, detune: -5, gain: 0.014, pan: -0.18 },
-      { type: "sine", freq: 196.2, detune: 4, gain: 0.010, pan: 0.22 }
-    ].forEach(function (voice) {
+    function env(gainParam, start, peak, attack, hold, release) {
+      const safePeak = Math.max(0.0002, peak);
+      gainParam.cancelScheduledValues(start);
+      gainParam.setValueAtTime(0.0001, start);
+      gainParam.linearRampToValueAtTime(safePeak, start + attack);
+      gainParam.setValueAtTime(safePeak * 0.82, start + attack + hold);
+      gainParam.exponentialRampToValueAtTime(0.0001, start + attack + hold + release);
+    }
+
+    function connectPanned(node, panValue, destination) {
+      const pan = createPan(panValue);
+      node.connect(pan);
+      pan.connect(destination);
+      return pan;
+    }
+
+    function stopSource(source, stopAt) {
+      try {
+        source.stop(stopAt);
+      } catch (e) {}
+    }
+
+    function scheduleBass(note, start, length, velocity) {
+      const sub = ctx.createOscillator();
+      const body = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      const bodyGain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const amp = ctx.createGain();
+      sub.type = "sine";
+      body.type = "sawtooth";
+      sub.frequency.setValueAtTime(note, start);
+      body.frequency.setValueAtTime(note * 2.01, start);
+      body.detune.setValueAtTime(-6, start);
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(118, start);
+      filter.frequency.linearRampToValueAtTime(174, start + 0.08);
+      filter.frequency.exponentialRampToValueAtTime(92, start + length + 0.12);
+      filter.Q.setValueAtTime(1.2, start);
+      subGain.gain.setValueAtTime(0.13 * velocity, start);
+      bodyGain.gain.setValueAtTime(0.030 * velocity, start);
+      env(amp.gain, start, 1, 0.026, Math.max(0.05, length * 0.42), Math.max(0.18, length * 0.55));
+      sub.connect(subGain);
+      body.connect(bodyGain);
+      subGain.connect(filter);
+      bodyGain.connect(filter);
+      filter.connect(amp);
+      amp.connect(bassGain);
+      sub.start(start);
+      body.start(start);
+      stopSource(sub, start + length + 0.38);
+      stopSource(body, start + length + 0.38);
+    }
+
+    function scheduleKick(start, strong) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       const filter = ctx.createBiquadFilter();
-      const pan = createPan(voice.pan);
-      osc.type = voice.type;
-      osc.frequency.setValueAtTime(voice.freq, now);
-      osc.detune.setValueAtTime(voice.detune, now);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(strong ? 52 : 46, start);
+      osc.frequency.exponentialRampToValueAtTime(28, start + 0.36);
       filter.type = "lowpass";
-      filter.frequency.setValueAtTime(420, now);
-      filter.Q.setValueAtTime(1.2, now);
-      gain.gain.setValueAtTime(voice.gain, now);
+      filter.frequency.setValueAtTime(126, start);
+      filter.Q.setValueAtTime(0.72, start);
+      env(gain.gain, start, strong ? 0.16 : 0.105, 0.012, 0.038, 0.38);
       osc.connect(filter);
       filter.connect(gain);
+      gain.connect(rhythmBus);
+      osc.start(start);
+      stopSource(osc, start + 0.54);
+    }
+
+    function scheduleTacticalClick(start, panValue, accent) {
+      const noise = ctx.createBufferSource();
+      const toneOsc = ctx.createOscillator();
+      const noiseGain = ctx.createGain();
+      const toneGain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const sum = ctx.createGain();
+      noise.buffer = makeNoise(0.16);
+      toneOsc.type = "triangle";
+      toneOsc.frequency.setValueAtTime(accent ? 1180 : 760, start);
+      toneOsc.frequency.exponentialRampToValueAtTime(accent ? 520 : 430, start + 0.09);
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(accent ? 1850 : 1380, start);
+      filter.Q.setValueAtTime(7.5, start);
+      env(noiseGain.gain, start, accent ? 0.016 : 0.010, 0.006, 0.018, 0.075);
+      env(toneGain.gain, start, accent ? 0.018 : 0.012, 0.006, 0.022, 0.11);
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      toneOsc.connect(toneGain);
+      noiseGain.connect(sum);
+      toneGain.connect(sum);
+      connectPanned(sum, panValue, rhythmBus);
+      noise.start(start);
+      toneOsc.start(start);
+      stopSource(noise, start + 0.18);
+      stopSource(toneOsc, start + 0.18);
+    }
+
+    function schedulePadChord(chord, start, chordIndex) {
+      const duration = cycle + 1.65;
+      chord.forEach(function (note, index) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        const panValue = [-0.42, 0.38, -0.12, 0.18, 0.48][index % 5];
+        osc.type = index % 2 ? "triangle" : "sawtooth";
+        osc.frequency.setValueAtTime(note, start);
+        osc.detune.setValueAtTime((index - 1.5) * 5 + (chordIndex % 2 ? 3 : -2), start);
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(360 + chordIndex * 34 + index * 24, start);
+        filter.frequency.linearRampToValueAtTime(650 + index * 38, start + duration * 0.42);
+        filter.frequency.exponentialRampToValueAtTime(390 + index * 30, start + duration - 0.2);
+        filter.Q.setValueAtTime(0.9, start);
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.linearRampToValueAtTime(0.010 - index * 0.0009, start + 1.45 + index * 0.18);
+        gain.gain.linearRampToValueAtTime(0.0065 - index * 0.00055, start + duration * 0.68);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+        osc.connect(filter);
+        filter.connect(gain);
+        connectPanned(gain, panValue, padBus);
+        osc.start(start);
+        stopSource(osc, start + duration + 0.08);
+      });
+    }
+
+    function scheduleTechAccent(freq, start, panValue, length, gainValue) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.74, start + length);
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(freq * 1.55, start);
+      filter.Q.setValueAtTime(8.5, start);
+      env(gain.gain, start, gainValue, 0.012, length * 0.18, length * 0.82);
+      osc.connect(filter);
+      filter.connect(gain);
+      connectPanned(gain, panValue, textureBus);
+      osc.start(start);
+      stopSource(osc, start + length + 0.05);
+    }
+
+    function scheduleTransition(start, cycleIndex) {
+      const sweep = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const pan = createPan(cycleIndex % 2 ? -0.32 : 0.32);
+      sweep.type = "sawtooth";
+      sweep.frequency.setValueAtTime(96, start);
+      sweep.frequency.exponentialRampToValueAtTime(410, start + 1.05);
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(260, start);
+      filter.frequency.linearRampToValueAtTime(920, start + 1.05);
+      filter.Q.setValueAtTime(6.2, start);
+      env(gain.gain, start, 0.024, 0.08, 0.35, 0.72);
+      sweep.connect(filter);
+      filter.connect(gain);
       gain.connect(pan);
-      pan.connect(padBus);
-      osc.start();
-      nodes.push({ osc: osc, gain: gain });
-    });
+      pan.connect(textureBus);
+      sweep.start(start);
+      stopSource(sweep, start + 1.2);
+    }
 
-    const padSweep = ctx.createOscillator();
-    const padDepth = ctx.createGain();
-    padSweep.type = "sine";
-    padSweep.frequency.setValueAtTime(0.045, now);
-    padDepth.gain.setValueAtTime(0.18, now);
-    padSweep.connect(padDepth);
-    padDepth.connect(padBus.gain);
-    padSweep.start();
-    nodes.push({ osc: padSweep, gain: padDepth });
-
-    const noise = ctx.createBufferSource();
-    const noiseGain = ctx.createGain();
-    const metalFilter = ctx.createBiquadFilter();
-    const metalLfo = ctx.createOscillator();
-    const metalDepth = ctx.createGain();
-    const metalPan = createPan(0.32);
-    noise.buffer = makeNoise(3.2);
-    noise.loop = true;
-    noiseGain.gain.setValueAtTime(0.018, now);
-    metalFilter.type = "bandpass";
-    metalFilter.frequency.setValueAtTime(620, now);
-    metalFilter.Q.setValueAtTime(7.5, now);
-    metalLfo.frequency.setValueAtTime(0.13, now);
-    metalDepth.gain.setValueAtTime(230, now);
-    metalLfo.connect(metalDepth);
-    metalDepth.connect(metalFilter.frequency);
-    noise.connect(metalFilter);
-    metalFilter.connect(noiseGain);
-    noiseGain.connect(metalPan);
-    metalPan.connect(textureBus);
-    noise.start();
-    metalLfo.start();
-    nodes.push({ osc: noise, gain: noiseGain }, { osc: metalLfo, gain: metalDepth });
+    const padPulse = ctx.createOscillator();
+    const padPulseDepth = ctx.createGain();
+    padPulse.type = "sine";
+    padPulse.frequency.setValueAtTime(0.031, now);
+    padPulseDepth.gain.setValueAtTime(0.055, now);
+    padPulse.connect(padPulseDepth);
+    padPulseDepth.connect(padBus.gain);
+    padPulse.start();
+    nodes.push({ osc: padPulse, gain: padPulseDepth });
 
     const tensionOsc = ctx.createOscillator();
     const tensionGain = ctx.createGain();
     const tensionFilter = ctx.createBiquadFilter();
     tensionOsc.type = "sawtooth";
-    tensionOsc.frequency.setValueAtTime(72, now);
+    tensionOsc.frequency.setValueAtTime(58, now);
     tensionFilter.type = "bandpass";
-    tensionFilter.frequency.setValueAtTime(300, now);
-    tensionFilter.Q.setValueAtTime(3.8, now);
+    tensionFilter.frequency.setValueAtTime(360, now);
+    tensionFilter.Q.setValueAtTime(4.4, now);
     tensionGain.gain.setValueAtTime(0.0001, now);
     tensionOsc.connect(tensionFilter);
     tensionFilter.connect(tensionGain);
-    tensionGain.connect(padBus);
+    tensionGain.connect(textureBus);
     tensionOsc.start();
     nodes.push({ osc: tensionOsc, gain: tensionGain });
 
-    function pulseHit() {
-      if (!STATE.ambient || !STATE.enabled || !STATE.ctx) return;
-      const hitNow = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(52, hitNow);
-      osc.frequency.exponentialRampToValueAtTime(34, hitNow + 0.42);
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(150, hitNow);
-      filter.Q.setValueAtTime(0.7, hitNow);
-      gain.gain.setValueAtTime(0.0001, hitNow);
-      gain.gain.exponentialRampToValueAtTime(0.075, hitNow + 0.018);
-      gain.gain.exponentialRampToValueAtTime(0.0001, hitNow + 0.52);
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(effectsInput);
-      osc.start(hitNow);
-      osc.stop(hitNow + 0.58);
-    }
+    const chordProgression = [
+      [87.31, 130.81, 174.61, 261.63],
+      [69.30, 103.83, 138.59, 207.65],
+      [77.78, 116.54, 155.56, 233.08],
+      [65.41, 98.00, 130.81, 196.00]
+    ];
+    const bassPattern = [
+      { beat: 0, note: 43.65, length: 0.78, velocity: 1.00 },
+      { beat: 1.5, note: 43.65, length: 0.42, velocity: 0.64 },
+      { beat: 2.5, note: 51.91, length: 0.52, velocity: 0.72 },
+      { beat: 3.5, note: 58.27, length: 0.44, velocity: 0.58 },
+      { beat: 4, note: 38.89, length: 0.82, velocity: 0.94 },
+      { beat: 5.5, note: 43.65, length: 0.45, velocity: 0.66 },
+      { beat: 6, note: 51.91, length: 0.58, velocity: 0.72 },
+      { beat: 7.25, note: 65.41, length: 0.38, velocity: 0.54 }
+    ];
+    const accents = [
+      { beat: 0.75, freq: 523.25, pan: -0.48 },
+      { beat: 2.25, freq: 392.00, pan: 0.36 },
+      { beat: 3.75, freq: 466.16, pan: -0.18 },
+      { beat: 5.25, freq: 622.25, pan: 0.46 },
+      { beat: 6.75, freq: 349.23, pan: -0.36 }
+    ];
+    let cycleIndex = 0;
 
-    const pulseTimer = rootWindow.setInterval(pulseHit, 1650);
-    rootWindow.setTimeout(pulseHit, 260);
+    function scheduleCycle() {
+      if (!STATE.ambient || !STATE.enabled || !STATE.ctx) return;
+      const start = ctx.currentTime + 0.08;
+      const chord = chordProgression[cycleIndex % chordProgression.length];
+      schedulePadChord(chord, start, cycleIndex);
+      bassPattern.forEach(function (step) {
+        scheduleBass(step.note, start + step.beat * beat, step.length * beat, step.velocity);
+      });
+      [0, 2, 4, 6].forEach(function (beatNumber) {
+        scheduleKick(start + beatNumber * beat, beatNumber === 0 || beatNumber === 4);
+      });
+      [1, 3, 5, 7].forEach(function (beatNumber, index) {
+        scheduleTacticalClick(start + beatNumber * beat, index % 2 ? 0.30 : -0.28, beatNumber === 5);
+      });
+      accents.forEach(function (step, index) {
+        const rotate = (index + cycleIndex) % accents.length;
+        scheduleTechAccent(
+          accents[rotate].freq,
+          start + step.beat * beat,
+          accents[rotate].pan,
+          0.16 + (index % 2) * 0.05,
+          0.016 + (index === 3 ? 0.006 : 0)
+        );
+      });
+      if (cycleIndex % 2 === 1) {
+        scheduleTransition(start + 7.15 * beat, cycleIndex);
+      }
+      try {
+        textureBus.gain.cancelScheduledValues(start);
+        textureBus.gain.setValueAtTime(textureBus.gain.value || 0.36, start);
+        textureBus.gain.linearRampToValueAtTime(cycleIndex % 3 === 2 ? 0.44 : 0.34, start + cycle * 0.55);
+        textureBus.gain.linearRampToValueAtTime(0.36, start + cycle - 0.1);
+      } catch (e) {}
+      cycleIndex += 1;
+    }
 
     STATE.ambient = {
       master: master,
       nodes: nodes,
+      timers: timers,
       bassGain: bassGain,
+      rhythmBus: rhythmBus,
+      padBus: padBus,
+      textureBus: textureBus,
       tensionGain: tensionGain,
-      effectsInput: effectsInput,
-      pulseTimer: pulseTimer
+      effectsInput: effectsInput
     };
+
+    scheduleCycle();
+    rememberInterval(scheduleCycle, Math.floor(cycle * 1000));
+    rememberInterval(function () {
+      if (!STATE.ambient || !STATE.enabled || !STATE.ctx) return;
+      const modNow = ctx.currentTime;
+      try {
+        delayFeedback.gain.cancelScheduledValues(modNow);
+        delayFeedback.gain.setValueAtTime(delayFeedback.gain.value || 0.24, modNow);
+        delayFeedback.gain.linearRampToValueAtTime(0.18 + Math.random() * 0.12, modNow + 3.2);
+      } catch (e) {}
+      try {
+        reverbFilter.frequency.cancelScheduledValues(modNow);
+        reverbFilter.frequency.setValueAtTime(reverbFilter.frequency.value || 720, modNow);
+        reverbFilter.frequency.linearRampToValueAtTime(620 + Math.random() * 360, modNow + 4.8);
+      } catch (e) {}
+    }, Math.floor(cycle * 2000));
+    rememberTimeout(function () {
+      if (STATE.ambient && STATE.enabled) scheduleTransition(ctx.currentTime + 0.1, 0);
+    }, 640);
+
     updateToggleButton();
   }
 
@@ -785,10 +989,16 @@ def render_analysis_audio_layer(asset_name, symbol):
       ambient.master.gain.setValueAtTime(Math.max(ambient.master.gain.value, 0.0001), now);
       ambient.master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
     } catch (e) {}
-    if (ambient.pulseTimer) {
-      try {
-        rootWindow.clearInterval(ambient.pulseTimer);
-      } catch (e) {}
+    if (ambient.timers) {
+      ambient.timers.forEach(function (timer) {
+        try {
+          if (timer.type === "timeout") {
+            rootWindow.clearTimeout(timer.id);
+          } else {
+            rootWindow.clearInterval(timer.id);
+          }
+        } catch (e) {}
+      });
     }
     ambient.nodes.forEach(function (node) {
       try {
