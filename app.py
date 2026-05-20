@@ -1,4 +1,5 @@
 import io
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -394,27 +395,91 @@ hr {
 )
 
 
-components.html(
-    """
+def render_analysis_audio_layer(asset_name, symbol):
+    """Injects a browser-local cyberpunk analysis ambience and voice layer."""
+    audio_html = (
+        """
+<div id="stock-insight-analysis-audio-root"></div>
 <script>
 (function () {
-  const STATE = {
-    ctx: null,
-    bound: new WeakSet(),
-    started: false
-  };
+  "use strict";
 
-  function getDoc() {
+  const CONFIG = {
+    assetName: __ASSET_NAME__,
+    symbol: __SYMBOL__
+  };
+  const ROOT_KEY = "__stockInsightAnalysisAudio";
+  const TOGGLE_ID = "stock-insight-audio-toggle";
+  const STYLE_ID = "stock-insight-audio-style";
+
+  function getParentWindow() {
     try {
-      if (window.parent && window.parent.document) return window.parent.document;
+      if (window.parent) return window.parent;
+    } catch (e) {}
+    return window;
+  }
+
+  function getDoc(rootWindow) {
+    try {
+      if (rootWindow && rootWindow.document) return rootWindow.document;
     } catch (e) {}
     return document;
   }
 
+  let rootWindow = getParentWindow();
+  let doc = getDoc(rootWindow);
+  let existingState;
+  let STATE;
+  try {
+    existingState = rootWindow[ROOT_KEY] || {};
+    rootWindow[ROOT_KEY] = existingState;
+    STATE = existingState;
+  } catch (e) {
+    rootWindow = window;
+    doc = document;
+    existingState = window[ROOT_KEY] || {};
+    window[ROOT_KEY] = existingState;
+    STATE = existingState;
+  }
+
+  STATE.assetName = String(CONFIG.assetName || CONFIG.symbol || "selected asset").trim();
+  STATE.symbol = String(CONFIG.symbol || "").trim();
+  STATE.boundButtons = STATE.boundButtons || new WeakSet();
+  STATE.ctx = STATE.ctx || null;
+  STATE.ambient = STATE.ambient || null;
+  STATE.started = STATE.started || false;
+  STATE.storageLoaded = STATE.storageLoaded || false;
+
+  function loadAmbientPreference() {
+    try {
+      const saved = rootWindow.localStorage.getItem("stockInsightAmbientEnabled");
+      return saved === null ? true : saved === "true";
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function saveAmbientPreference() {
+    try {
+      rootWindow.localStorage.setItem("stockInsightAmbientEnabled", STATE.enabled ? "true" : "false");
+    } catch (e) {}
+  }
+
+  if (!STATE.storageLoaded) {
+    STATE.enabled = loadAmbientPreference();
+    STATE.storageLoaded = true;
+  } else if (typeof STATE.enabled !== "boolean") {
+    STATE.enabled = true;
+  }
+
+  function audioConstructor() {
+    return rootWindow.AudioContext || rootWindow.webkitAudioContext || window.AudioContext || window.webkitAudioContext;
+  }
+
   function ensureAudio() {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const AudioContext = audioConstructor();
     if (!AudioContext) return null;
-    if (!STATE.ctx) {
+    if (!STATE.ctx || STATE.ctx.state === "closed") {
       STATE.ctx = new AudioContext();
     }
     if (STATE.ctx.state === "suspended") {
@@ -424,94 +489,376 @@ components.html(
     return STATE.ctx;
   }
 
-  function tone(freq, start, duration, type, gainValue) {
-    const ctx = ensureAudio();
-    if (!ctx) return;
+  function makeOsc(type, frequency, gainValue, destination) {
+    const ctx = STATE.ctx;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = type || "triangle";
-    osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-    filter.type = "highpass";
-    filter.frequency.setValueAtTime(320, ctx.currentTime + start);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
-    gain.gain.exponentialRampToValueAtTime(gainValue || 0.055, ctx.currentTime + start + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + duration);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime + start);
-    osc.stop(ctx.currentTime + start + duration + 0.02);
-  }
-
-  function neonClick() {
-    tone(820, 0.00, 0.055, "square", 0.030);
-    tone(1240, 0.035, 0.060, "triangle", 0.022);
-  }
-
-  function scanSound() {
-    const ctx = ensureAudio();
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = "sawtooth";
-    filter.type = "bandpass";
-    filter.Q.value = 9;
-    osc.frequency.setValueAtTime(190, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1420, ctx.currentTime + 0.34);
-    filter.frequency.setValueAtTime(420, ctx.currentTime);
-    filter.frequency.exponentialRampToValueAtTime(2200, ctx.currentTime + 0.34);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.045, ctx.currentTime + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.38);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+    gain.gain.setValueAtTime(gainValue, ctx.currentTime);
+    osc.connect(gain);
+    gain.connect(destination);
     osc.start();
-    osc.stop(ctx.currentTime + 0.42);
+    return { osc: osc, gain: gain };
   }
 
-  function addSound() {
-    tone(520, 0.00, 0.075, "sine", 0.026);
-    tone(780, 0.060, 0.090, "triangle", 0.024);
-    tone(1040, 0.125, 0.085, "sine", 0.018);
+  function makeNoise(seconds) {
+    const ctx = STATE.ctx;
+    const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * 0.42;
+    }
+    return buffer;
   }
 
-  function bindSounds() {
-    const doc = getDoc();
-    const nodes = doc.querySelectorAll("button, [role='tab'], [role='combobox'], [role='option'], input");
-    nodes.forEach(function (node) {
-      if (STATE.bound.has(node)) return;
-      STATE.bound.add(node);
-      node.addEventListener("click", function () {
-        const text = (node.innerText || node.value || node.getAttribute("aria-label") || "").toLowerCase();
-        if (text.includes("scanner")) {
-          scanSound();
-        } else if (text.includes("watchlist") || text.includes("ajouter")) {
-          addSound();
-        } else if (node.getAttribute("role") === "tab") {
-          neonClick();
-        } else if (text.includes("recherche") || text.includes("lancer") || text.includes("palette")) {
-          neonClick();
-        } else if (node.tagName === "BUTTON") {
-          neonClick();
+  function startAmbience() {
+    const ctx = ensureAudio();
+    if (!ctx || !STATE.enabled || STATE.ambient) return;
+
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    const lowpass = ctx.createBiquadFilter();
+    const compressor = ctx.createDynamicsCompressor();
+    const nodes = [];
+
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(0.028, now + 1.6);
+    lowpass.type = "lowpass";
+    lowpass.frequency.setValueAtTime(260, now);
+    lowpass.Q.setValueAtTime(0.85, now);
+    compressor.threshold.setValueAtTime(-26, now);
+    compressor.knee.setValueAtTime(18, now);
+    compressor.ratio.setValueAtTime(4, now);
+    compressor.attack.setValueAtTime(0.018, now);
+    compressor.release.setValueAtTime(0.45, now);
+
+    lowpass.connect(compressor);
+    compressor.connect(master);
+    master.connect(ctx.destination);
+
+    nodes.push(makeOsc("sine", 29, 0.46, lowpass));
+    nodes.push(makeOsc("sawtooth", 43, 0.09, lowpass));
+    nodes.push(makeOsc("triangle", 86, 0.035, lowpass));
+
+    const bass = makeOsc("sine", 36, 0.012, lowpass);
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.type = "sine";
+    lfo.frequency.setValueAtTime(0.31, now);
+    lfoGain.gain.setValueAtTime(0.010, now);
+    lfo.connect(lfoGain);
+    lfoGain.connect(bass.gain.gain);
+    lfo.start();
+    nodes.push(bass, { osc: lfo, gain: lfoGain });
+
+    const noise = ctx.createBufferSource();
+    const noiseGain = ctx.createGain();
+    const metalFilter = ctx.createBiquadFilter();
+    const metalLfo = ctx.createOscillator();
+    const metalDepth = ctx.createGain();
+    noise.buffer = makeNoise(2.5);
+    noise.loop = true;
+    noiseGain.gain.setValueAtTime(0.006, now);
+    metalFilter.type = "bandpass";
+    metalFilter.frequency.setValueAtTime(720, now);
+    metalFilter.Q.setValueAtTime(8, now);
+    metalLfo.frequency.setValueAtTime(0.17, now);
+    metalDepth.gain.setValueAtTime(180, now);
+    metalLfo.connect(metalDepth);
+    metalDepth.connect(metalFilter.frequency);
+    noise.connect(metalFilter);
+    metalFilter.connect(noiseGain);
+    noiseGain.connect(lowpass);
+    noise.start();
+    metalLfo.start();
+    nodes.push({ osc: noise, gain: noiseGain }, { osc: metalLfo, gain: metalDepth });
+
+    STATE.ambient = { master: master, nodes: nodes };
+    updateToggleButton();
+  }
+
+  function stopAmbience() {
+    if (!STATE.ambient || !STATE.ctx) return;
+    const ctx = STATE.ctx;
+    const now = ctx.currentTime;
+    const ambient = STATE.ambient;
+    try {
+      ambient.master.gain.cancelScheduledValues(now);
+      ambient.master.gain.setValueAtTime(Math.max(ambient.master.gain.value, 0.0001), now);
+      ambient.master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+    } catch (e) {}
+    ambient.nodes.forEach(function (node) {
+      try {
+        node.osc.stop(now + 0.52);
+      } catch (e) {}
+    });
+    window.setTimeout(function () {
+      try {
+        ambient.master.disconnect();
+      } catch (e) {}
+      ambient.nodes.forEach(function (node) {
+        try {
+          node.osc.disconnect();
+        } catch (e) {}
+      });
+    }, 620);
+    STATE.ambient = null;
+    updateToggleButton();
+  }
+
+  function tone(options) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime + (options.delay || 0);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = options.type || "sine";
+    osc.frequency.setValueAtTime(Math.max(1, options.freq), now);
+    if (options.endFreq) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(1, options.endFreq), now + options.duration);
+    }
+    filter.type = options.filterType || "lowpass";
+    filter.frequency.setValueAtTime(options.filterFreq || 480, now);
+    filter.Q.setValueAtTime(options.q || 1, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(options.gain || 0.045, now + 0.018);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + options.duration);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + options.duration + 0.04);
+  }
+
+  function noiseHit(delay, duration, gainValue, filterFreq) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime + (delay || 0);
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    source.buffer = makeNoise(Math.max(duration, 0.12));
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(filterFreq || 120, now);
+    filter.Q.setValueAtTime(5, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(gainValue || 0.055, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    source.start(now);
+    source.stop(now + duration + 0.03);
+  }
+
+  function terminalEffect() {
+    const freqs = [148, 214, 319, 522, 377, 241, 688, 462, 290];
+    freqs.forEach(function (freq, index) {
+      tone({
+        freq: freq,
+        endFreq: freq * 1.08,
+        delay: 0.08 + index * 0.055,
+        duration: 0.055,
+        type: index % 2 ? "square" : "sawtooth",
+        gain: 0.022,
+        filterType: "bandpass",
+        filterFreq: freq * 2.3,
+        q: 9
+      });
+    });
+    noiseHit(0.12, 0.34, 0.026, 910);
+  }
+
+  function scanImpactAndRise() {
+    startAmbience();
+    tone({ freq: 47, endFreq: 26, delay: 0, duration: 0.78, type: "sine", gain: 0.18, filterFreq: 145 });
+    tone({ freq: 82, endFreq: 48, delay: 0.015, duration: 0.46, type: "triangle", gain: 0.07, filterFreq: 220 });
+    noiseHit(0, 0.28, 0.08, 95);
+    tone({ freq: 72, endFreq: 620, delay: 0.16, duration: 1.24, type: "sawtooth", gain: 0.075, filterType: "bandpass", filterFreq: 520, q: 7 });
+    tone({ freq: 210, endFreq: 1860, delay: 0.26, duration: 0.92, type: "square", gain: 0.032, filterType: "bandpass", filterFreq: 980, q: 10 });
+    terminalEffect();
+  }
+
+  function pickVoice(synthWindow) {
+    try {
+      const voices = synthWindow.speechSynthesis.getVoices() || [];
+      if (!voices.length) return null;
+      const preferred = ["daniel", "alex", "fred", "google uk english male", "google us english", "microsoft david"];
+      for (const token of preferred) {
+        const match = voices.find(function (voice) {
+          return voice.name && voice.name.toLowerCase().includes(token);
+        });
+        if (match) return match;
+      }
+      return voices.find(function (voice) {
+        return voice.lang && voice.lang.toLowerCase().startsWith("en");
+      }) || voices[0];
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function speak(text) {
+    const synthWindow = rootWindow.speechSynthesis ? rootWindow : window;
+    if (!synthWindow.speechSynthesis || !synthWindow.SpeechSynthesisUtterance) return;
+    try {
+      synthWindow.speechSynthesis.cancel();
+      const utterance = new synthWindow.SpeechSynthesisUtterance(text);
+      utterance.lang = "en-US";
+      utterance.rate = 0.72;
+      utterance.pitch = 0.45;
+      utterance.volume = 0.92;
+      const voice = pickVoice(synthWindow);
+      if (voice) utterance.voice = voice;
+      synthWindow.speechSynthesis.speak(utterance);
+    } catch (e) {}
+  }
+
+  function assetName() {
+    return (STATE.assetName || STATE.symbol || "selected asset").replace(/\\s+/g, " ").trim();
+  }
+
+  function launchAnalysisVoice(mode) {
+    const name = assetName();
+    if (mode === "launch") {
+      speak("Launching " + name + " analysis.");
+    } else {
+      speak("Scanning " + name + ".");
+    }
+  }
+
+  function triggerScan(mode) {
+    ensureAudio();
+    scanImpactAndRise();
+    launchAnalysisVoice(mode);
+  }
+
+  function updateToggleButton() {
+    const button = doc.getElementById(TOGGLE_ID);
+    if (!button) return;
+    button.textContent = STATE.enabled ? "Ambiance sonore: ON" : "Ambiance sonore: OFF";
+    button.setAttribute("aria-pressed", STATE.enabled ? "true" : "false");
+    button.className = STATE.enabled ? "stock-audio-toggle stock-audio-toggle-on" : "stock-audio-toggle";
+  }
+
+  function toggleAmbience(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    ensureAudio();
+    STATE.enabled = !STATE.enabled;
+    saveAmbientPreference();
+    if (STATE.enabled) {
+      startAmbience();
+    } else {
+      stopAmbience();
+    }
+    updateToggleButton();
+  }
+
+  function installToggle() {
+    if (!doc.getElementById(STYLE_ID)) {
+      const style = doc.createElement("style");
+      style.id = STYLE_ID;
+      style.textContent = [
+        ".stock-audio-toggle{position:fixed;right:18px;bottom:18px;z-index:2147483000;",
+        "min-height:44px;padding:11px 15px;border-radius:999px;border:1px solid rgba(34,211,238,.42);",
+        "background:linear-gradient(135deg,rgba(3,7,18,.96),rgba(30,41,59,.92));color:#cbd5e1;",
+        "font:800 12px/1.1 'Courier New',monospace;letter-spacing:.08em;text-transform:uppercase;",
+        "box-shadow:0 0 24px rgba(34,211,238,.15),inset 0 0 18px rgba(15,23,42,.85);",
+        "touch-action:manipulation;-webkit-tap-highlight-color:transparent;cursor:pointer}",
+        ".stock-audio-toggle-on{color:#ecfeff;border-color:rgba(34,211,238,.85);",
+        "background:linear-gradient(135deg,rgba(2,6,23,.98),rgba(8,47,73,.92),rgba(88,28,135,.82));",
+        "box-shadow:0 0 34px rgba(34,211,238,.38),0 0 52px rgba(88,28,135,.20),inset 0 0 22px rgba(34,211,238,.10)}",
+        "@media (max-width:640px){.stock-audio-toggle{right:10px;bottom:10px;padding:10px 12px;font-size:11px}}"
+      ].join("");
+      doc.head.appendChild(style);
+    }
+
+    let button = doc.getElementById(TOGGLE_ID);
+    if (!button) {
+      button = doc.createElement("button");
+      button.id = TOGGLE_ID;
+      button.type = "button";
+      button.setAttribute("aria-label", "Activer ou desactiver l'ambiance sonore d'analyse");
+      doc.body.appendChild(button);
+    }
+    button.onclick = toggleAmbience;
+    updateToggleButton();
+  }
+
+  function unlockOnFirstInteraction(event) {
+    if (event && event.target && event.target.id === TOGGLE_ID) return;
+    ensureAudio();
+    if (STATE.enabled) startAmbience();
+  }
+
+  function bindUnlock() {
+    if (STATE.unlockHandlers) {
+      STATE.unlockHandlers.forEach(function (entry) {
+        try {
+          entry.doc.removeEventListener(entry.type, entry.handler, true);
+        } catch (e) {}
+      });
+    }
+    STATE.unlockHandlers = [];
+    ["pointerdown", "touchstart", "keydown", "click"].forEach(function (type) {
+      doc.addEventListener(type, unlockOnFirstInteraction, { passive: true, capture: true });
+      STATE.unlockHandlers.push({ doc: doc, type: type, handler: unlockOnFirstInteraction });
+    });
+  }
+
+  function bindScanButtons() {
+    const buttons = doc.querySelectorAll("button");
+    buttons.forEach(function (button) {
+      if (button.id === TOGGLE_ID || STATE.boundButtons.has(button)) return;
+      STATE.boundButtons.add(button);
+      button.addEventListener("click", function () {
+        const text = (button.innerText || button.textContent || button.value || button.getAttribute("aria-label") || "").toLowerCase();
+        if (text.includes("scanner") || text.includes("scan")) {
+          triggerScan("scan");
+        } else if (text.includes("lancer la recherche") || text.includes("launch")) {
+          triggerScan("launch");
         }
-      }, { passive: true });
-
-      node.addEventListener("change", function () {
-        if (node.tagName === "INPUT") neonClick();
       }, { passive: true });
     });
   }
 
-  bindSounds();
-  setInterval(bindSounds, 900);
+  if (rootWindow.speechSynthesis) {
+    try {
+      rootWindow.speechSynthesis.onvoiceschanged = function () {
+        pickVoice(rootWindow);
+      };
+    } catch (e) {}
+  }
+
+  installToggle();
+  bindUnlock();
+  bindScanButtons();
+  if (STATE.bindTimer && STATE.bindTimerWindow) {
+    try {
+      STATE.bindTimerWindow.clearInterval(STATE.bindTimer);
+    } catch (e) {}
+  }
+  STATE.bindTimer = window.setInterval(function () {
+    installToggle();
+    bindScanButtons();
+  }, 900);
+  STATE.bindTimerWindow = window;
+  if (STATE.started && STATE.enabled && !STATE.ambient) {
+    startAmbience();
+  }
 })();
 </script>
-""",
-    height=0,
-)
+"""
+        .replace("__ASSET_NAME__", json.dumps(str(asset_name or symbol or "selected asset")))
+        .replace("__SYMBOL__", json.dumps(str(symbol or "")))
+    )
+    components.html(audio_html, height=1)
 
 
 CATEGORIES = [
@@ -944,6 +1291,7 @@ with st.sidebar:
 
     labels = filtered.apply(asset_label, axis=1).tolist()
     symbol_by_label = dict(zip(labels, filtered["symbol"].tolist()))
+    name_by_symbol = dict(zip(filtered["symbol"].tolist(), filtered["name"].tolist()))
     previous_symbol = st.session_state.get("selected_asset_symbol", "AAPL")
     default_index = 0
     if previous_symbol in filtered["symbol"].tolist():
@@ -956,6 +1304,7 @@ with st.sidebar:
         help="Sélecteur principal : ouvre la liste ou tape directement pour chercher dans les résultats.",
     )
     symbol = symbol_by_label.get(selected_label, "AAPL")
+    selected_asset_display_name = name_by_symbol.get(symbol, symbol)
     st.session_state.selected_asset_symbol = symbol
 
     if used_popular_fallback:
@@ -990,6 +1339,7 @@ history_is_fallback = bool(getattr(hist, "attrs", {}).get("is_fallback", False))
 selected_asset = ASSET_METADATA.get(symbol, {})
 
 name = info.get("longName") or info.get("shortName") or selected_asset.get("name") or symbol
+voice_asset_name = selected_asset_display_name or selected_asset.get("name") or name or symbol
 sector = info.get("sector", "N/D")
 industry = info.get("industry", "N/D")
 country = info.get("country", "N/D")
@@ -998,6 +1348,9 @@ asset_type = info.get("quoteType") or selected_asset.get("category") or "N/D"
 price = float(close.iloc[-1]) if data_available else None
 previous = float(close.iloc[-2]) if len(close) > 1 else price
 change = ((price - previous) / previous) * 100 if price is not None and previous else None
+
+
+render_analysis_audio_layer(voice_asset_name, symbol)
 
 
 st.markdown('<div class="neon-title">📈 Stock Insight Neon Terminal</div>', unsafe_allow_html=True)
