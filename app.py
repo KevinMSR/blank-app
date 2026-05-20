@@ -87,6 +87,15 @@ section[data-testid="stSidebar"] {
     box-shadow: 12px 0 42px rgba(34,211,238,.08);
 }
 
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap:.55rem;
+}
+
+section[data-testid="stSidebar"] .stMarkdown,
+section[data-testid="stSidebar"] .stCaption {
+    margin-bottom:.15rem;
+}
+
 section[data-testid="stSidebar"] * { color:#f8fafc !important; }
 section[data-testid="stSidebar"] .stCaption { color:#cbd5e1 !important; }
 
@@ -232,8 +241,12 @@ div.stButton > button:hover {
 }
 
 .stTabs [data-baseweb="tab-list"] {
-    gap:10px;
+    gap:8px;
     border-bottom:1px solid rgba(34,211,238,.18);
+    overflow-x:auto;
+    flex-wrap:wrap;
+    scrollbar-width:thin;
+    scrollbar-color:rgba(34,211,238,.55) rgba(15,23,42,.45);
 }
 
 .stTabs [data-baseweb="tab"] {
@@ -242,6 +255,8 @@ div.stButton > button:hover {
     border-radius:12px 12px 0 0;
     color:#e5e7eb;
     box-shadow:0 0 12px rgba(34,211,238,.06);
+    min-height:42px;
+    white-space:nowrap;
 }
 
 .stTabs [aria-selected="true"] {
@@ -265,6 +280,18 @@ input::placeholder, textarea::placeholder {
 div[data-baseweb="select"] * {
     background-color: rgba(3,7,18,.96) !important;
     color: #f8fafc !important;
+}
+
+div[data-baseweb="select"] > div,
+div[data-testid="stTextInput"] input,
+section[data-testid="stSidebar"] button {
+    min-height:44px;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"],
+section[data-testid="stSidebar"] div[data-testid="stTextInput"],
+section[data-testid="stSidebar"] div.stButton {
+    margin-bottom:.35rem;
 }
 
 div[data-testid="stTextInput"] label,
@@ -302,6 +329,64 @@ hr {
     font-family:"Courier New", monospace;
     text-align:center;
     margin-top:24px;
+}
+
+@media (max-width: 1024px) {
+    .block-container {
+        padding:1.1rem .8rem 2rem;
+    }
+
+    .neon-title {
+        font-size:34px;
+    }
+
+    .neon-subtitle {
+        letter-spacing:.10em;
+    }
+
+    .card {
+        padding:15px;
+        margin-bottom:12px;
+    }
+
+    .kpi {
+        padding:14px;
+        min-height:96px;
+    }
+
+    .kpi-value {
+        font-size:22px;
+    }
+
+    .stTabs [data-baseweb="tab-list"] {
+        flex-wrap:nowrap;
+        overflow-x:auto;
+        padding-bottom:4px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        flex:0 0 auto;
+        padding:8px 12px;
+    }
+}
+
+@media (max-width: 640px) {
+    .block-container {
+        padding:.8rem .55rem 1.5rem;
+    }
+
+    .neon-title {
+        font-size:28px;
+    }
+
+    .notice, .data-missing, .mini-chip {
+        padding:10px 12px;
+        margin-bottom:12px;
+    }
+
+    div[data-testid="stMetric"] {
+        padding:12px;
+    }
 }
 </style>
 """,
@@ -395,7 +480,7 @@ components.html(
 
   function bindSounds() {
     const doc = getDoc();
-    const nodes = doc.querySelectorAll("button, [role='tab'], input");
+    const nodes = doc.querySelectorAll("button, [role='tab'], [role='combobox'], [role='option'], input");
     nodes.forEach(function (node) {
       if (STATE.bound.has(node)) return;
       STATE.bound.add(node);
@@ -407,7 +492,7 @@ components.html(
           addSound();
         } else if (node.getAttribute("role") === "tab") {
           neonClick();
-        } else if (text.includes("recherche") || text.includes("lancer")) {
+        } else if (text.includes("recherche") || text.includes("lancer") || text.includes("palette")) {
           neonClick();
         } else if (node.tagName === "BUTTON") {
           neonClick();
@@ -429,105 +514,123 @@ components.html(
 )
 
 
-BASE_ASSETS = {
-    "Apple": "AAPL",
-    "Microsoft": "MSFT",
-    "Nvidia": "NVDA",
-    "Tesla": "TSLA",
-    "Amazon": "AMZN",
-    "Meta": "META",
-    "Google": "GOOGL",
-    "Netflix": "NFLX",
-    "AMD": "AMD",
-    "Intel": "INTC",
-    "Palantir": "PLTR",
-    "Coinbase": "COIN",
-    "Berkshire Hathaway": "BRK-B",
-    "Visa": "V",
-    "Mastercard": "MA",
-    "JPMorgan": "JPM",
-    "BlackRock": "BLK",
-    "McDonald's": "MCD",
-    "Coca-Cola": "KO",
-    "Pepsi": "PEP",
-    "Nike": "NKE",
-    "Walmart": "WMT",
-    "Costco": "COST",
-    "Eli Lilly": "LLY",
-    "Broadcom": "AVGO",
-    "Oracle": "ORCL",
-    "Salesforce": "CRM",
-    "Adobe": "ADBE",
-    "Cisco": "CSCO",
-    "Qualcomm": "QCOM",
-    "Texas Instruments": "TXN",
-    "Uber": "UBER",
-    "Shopify": "SHOP",
-    "Sea Limited": "SE",
-    "MercadoLibre": "MELI",
-    "LVMH": "MC.PA",
-    "TotalEnergies": "TTE.PA",
-    "Airbus": "AIR.PA",
-    "BNP Paribas": "BNP.PA",
-    "Schneider Electric": "SU.PA",
-    "Hermes": "RMS.PA",
-    "Safran": "SAF.PA",
-    "Sanofi": "SAN.PA",
-    "AXA": "CS.PA",
-    "Dassault Systemes": "DSY.PA",
-    "L'Oreal": "OR.PA",
-    "Kering": "KER.PA",
-    "Renault": "RNO.PA",
-    "Stellantis": "STLAP.PA",
-    "Societe Generale": "GLE.PA",
-    "Credit Agricole": "ACA.PA",
-    "CAC 40": "^FCHI",
-    "DAX": "^GDAXI",
-    "FTSE 100": "^FTSE",
-    "Euro Stoxx 50": "^STOXX50E",
-    "S&P 500": "^GSPC",
-    "Nasdaq 100": "^NDX",
-    "Dow Jones": "^DJI",
-    "Russell 2000": "^RUT",
-    "Nikkei 225": "^N225",
-    "Hang Seng": "^HSI",
-    "Bitcoin": "BTC-USD",
-    "Ethereum": "ETH-USD",
-    "Solana": "SOL-USD",
-    "BNB": "BNB-USD",
-    "XRP": "XRP-USD",
-    "Cardano": "ADA-USD",
-    "Dogecoin": "DOGE-USD",
-    "Avalanche": "AVAX-USD",
-    "Chainlink": "LINK-USD",
-    "Polkadot": "DOT-USD",
-    "Polygon": "MATIC-USD",
-    "Litecoin": "LTC-USD",
-    "Gold": "GC=F",
-    "Silver": "SI=F",
-    "Copper": "HG=F",
-    "Oil WTI": "CL=F",
-    "Brent Oil": "BZ=F",
-    "Natural Gas": "NG=F",
-    "Corn": "ZC=F",
-    "Soybean": "ZS=F",
-    "EUR/USD": "EURUSD=X",
-    "GBP/USD": "GBPUSD=X",
-    "USD/JPY": "JPY=X",
-    "USD/CHF": "CHF=X",
-    "AUD/USD": "AUDUSD=X",
-    "USD/CAD": "CAD=X",
-    "SPY ETF": "SPY",
-    "QQQ ETF": "QQQ",
-    "Vanguard S&P 500 ETF": "VOO",
-    "iShares MSCI World ETF": "URTH",
-    "ARK Innovation ETF": "ARKK",
-    "iShares Russell 2000 ETF": "IWM",
-    "Financial Select Sector ETF": "XLF",
-    "Technology Select Sector ETF": "XLK",
-    "Energy Select Sector ETF": "XLE",
-    "Gold ETF": "GLD",
-}
+CATEGORIES = [
+    "Tous",
+    "Actions US",
+    "Actions Europe",
+    "Crypto",
+    "ETF",
+    "Forex",
+    "Indices",
+    "Matières premières",
+]
+
+
+POPULAR_ASSETS = [
+    {"name": "Apple", "symbol": "AAPL", "category": "Actions US"},
+    {"name": "Microsoft", "symbol": "MSFT", "category": "Actions US"},
+    {"name": "Nvidia", "symbol": "NVDA", "category": "Actions US"},
+    {"name": "Tesla", "symbol": "TSLA", "category": "Actions US"},
+    {"name": "Amazon", "symbol": "AMZN", "category": "Actions US"},
+    {"name": "Meta", "symbol": "META", "category": "Actions US"},
+    {"name": "Google", "symbol": "GOOGL", "category": "Actions US"},
+    {"name": "Netflix", "symbol": "NFLX", "category": "Actions US"},
+    {"name": "AMD", "symbol": "AMD", "category": "Actions US"},
+    {"name": "Intel", "symbol": "INTC", "category": "Actions US"},
+    {"name": "Palantir", "symbol": "PLTR", "category": "Actions US"},
+    {"name": "Coinbase", "symbol": "COIN", "category": "Actions US"},
+    {"name": "Berkshire Hathaway", "symbol": "BRK-B", "category": "Actions US"},
+    {"name": "Visa", "symbol": "V", "category": "Actions US"},
+    {"name": "Mastercard", "symbol": "MA", "category": "Actions US"},
+    {"name": "JPMorgan", "symbol": "JPM", "category": "Actions US"},
+    {"name": "BlackRock", "symbol": "BLK", "category": "Actions US"},
+    {"name": "McDonald's", "symbol": "MCD", "category": "Actions US"},
+    {"name": "Coca-Cola", "symbol": "KO", "category": "Actions US"},
+    {"name": "Pepsi", "symbol": "PEP", "category": "Actions US"},
+    {"name": "Nike", "symbol": "NKE", "category": "Actions US"},
+    {"name": "Walmart", "symbol": "WMT", "category": "Actions US"},
+    {"name": "Costco", "symbol": "COST", "category": "Actions US"},
+    {"name": "Eli Lilly", "symbol": "LLY", "category": "Actions US"},
+    {"name": "Broadcom", "symbol": "AVGO", "category": "Actions US"},
+    {"name": "Oracle", "symbol": "ORCL", "category": "Actions US"},
+    {"name": "Salesforce", "symbol": "CRM", "category": "Actions US"},
+    {"name": "Adobe", "symbol": "ADBE", "category": "Actions US"},
+    {"name": "Cisco", "symbol": "CSCO", "category": "Actions US"},
+    {"name": "Qualcomm", "symbol": "QCOM", "category": "Actions US"},
+    {"name": "Texas Instruments", "symbol": "TXN", "category": "Actions US"},
+    {"name": "Uber", "symbol": "UBER", "category": "Actions US"},
+    {"name": "Shopify", "symbol": "SHOP", "category": "Actions US"},
+    {"name": "Sea Limited", "symbol": "SE", "category": "Actions US"},
+    {"name": "MercadoLibre", "symbol": "MELI", "category": "Actions US"},
+    {"name": "LVMH", "symbol": "MC.PA", "category": "Actions Europe"},
+    {"name": "TotalEnergies", "symbol": "TTE.PA", "category": "Actions Europe"},
+    {"name": "Airbus", "symbol": "AIR.PA", "category": "Actions Europe"},
+    {"name": "BNP Paribas", "symbol": "BNP.PA", "category": "Actions Europe"},
+    {"name": "Schneider Electric", "symbol": "SU.PA", "category": "Actions Europe"},
+    {"name": "Hermes", "symbol": "RMS.PA", "category": "Actions Europe"},
+    {"name": "Safran", "symbol": "SAF.PA", "category": "Actions Europe"},
+    {"name": "Sanofi", "symbol": "SAN.PA", "category": "Actions Europe"},
+    {"name": "AXA", "symbol": "CS.PA", "category": "Actions Europe"},
+    {"name": "Dassault Systemes", "symbol": "DSY.PA", "category": "Actions Europe"},
+    {"name": "L'Oreal", "symbol": "OR.PA", "category": "Actions Europe"},
+    {"name": "Kering", "symbol": "KER.PA", "category": "Actions Europe"},
+    {"name": "Renault", "symbol": "RNO.PA", "category": "Actions Europe"},
+    {"name": "Stellantis", "symbol": "STLAP.PA", "category": "Actions Europe"},
+    {"name": "Societe Generale", "symbol": "GLE.PA", "category": "Actions Europe"},
+    {"name": "Credit Agricole", "symbol": "ACA.PA", "category": "Actions Europe"},
+    {"name": "Bitcoin", "symbol": "BTC-USD", "category": "Crypto"},
+    {"name": "Ethereum", "symbol": "ETH-USD", "category": "Crypto"},
+    {"name": "Solana", "symbol": "SOL-USD", "category": "Crypto"},
+    {"name": "BNB", "symbol": "BNB-USD", "category": "Crypto"},
+    {"name": "XRP", "symbol": "XRP-USD", "category": "Crypto"},
+    {"name": "Dogecoin", "symbol": "DOGE-USD", "category": "Crypto"},
+    {"name": "Cardano", "symbol": "ADA-USD", "category": "Crypto"},
+    {"name": "Avalanche", "symbol": "AVAX-USD", "category": "Crypto"},
+    {"name": "Chainlink", "symbol": "LINK-USD", "category": "Crypto"},
+    {"name": "Polkadot", "symbol": "DOT-USD", "category": "Crypto"},
+    {"name": "Polygon", "symbol": "MATIC-USD", "category": "Crypto"},
+    {"name": "Litecoin", "symbol": "LTC-USD", "category": "Crypto"},
+    {"name": "SPDR S&P 500 ETF", "symbol": "SPY", "category": "ETF"},
+    {"name": "Invesco QQQ ETF", "symbol": "QQQ", "category": "ETF"},
+    {"name": "Vanguard S&P 500 ETF", "symbol": "VOO", "category": "ETF"},
+    {"name": "iShares MSCI World ETF", "symbol": "URTH", "category": "ETF"},
+    {"name": "ARK Innovation ETF", "symbol": "ARKK", "category": "ETF"},
+    {"name": "iShares Russell 2000 ETF", "symbol": "IWM", "category": "ETF"},
+    {"name": "Financial Select Sector ETF", "symbol": "XLF", "category": "ETF"},
+    {"name": "Technology Select Sector ETF", "symbol": "XLK", "category": "ETF"},
+    {"name": "Energy Select Sector ETF", "symbol": "XLE", "category": "ETF"},
+    {"name": "Gold ETF", "symbol": "GLD", "category": "ETF"},
+    {"name": "EUR/USD", "symbol": "EURUSD=X", "category": "Forex"},
+    {"name": "GBP/USD", "symbol": "GBPUSD=X", "category": "Forex"},
+    {"name": "USD/JPY", "symbol": "JPY=X", "category": "Forex"},
+    {"name": "USD/CHF", "symbol": "CHF=X", "category": "Forex"},
+    {"name": "AUD/USD", "symbol": "AUDUSD=X", "category": "Forex"},
+    {"name": "USD/CAD", "symbol": "CAD=X", "category": "Forex"},
+    {"name": "NZD/USD", "symbol": "NZDUSD=X", "category": "Forex"},
+    {"name": "EUR/GBP", "symbol": "EURGBP=X", "category": "Forex"},
+    {"name": "S&P 500", "symbol": "^GSPC", "category": "Indices"},
+    {"name": "Nasdaq 100", "symbol": "^NDX", "category": "Indices"},
+    {"name": "Dow Jones", "symbol": "^DJI", "category": "Indices"},
+    {"name": "Russell 2000", "symbol": "^RUT", "category": "Indices"},
+    {"name": "CAC 40", "symbol": "^FCHI", "category": "Indices"},
+    {"name": "DAX", "symbol": "^GDAXI", "category": "Indices"},
+    {"name": "FTSE 100", "symbol": "^FTSE", "category": "Indices"},
+    {"name": "Euro Stoxx 50", "symbol": "^STOXX50E", "category": "Indices"},
+    {"name": "Nikkei 225", "symbol": "^N225", "category": "Indices"},
+    {"name": "Hang Seng", "symbol": "^HSI", "category": "Indices"},
+    {"name": "Gold Futures", "symbol": "GC=F", "category": "Matières premières"},
+    {"name": "Silver Futures", "symbol": "SI=F", "category": "Matières premières"},
+    {"name": "Copper Futures", "symbol": "HG=F", "category": "Matières premières"},
+    {"name": "Oil WTI", "symbol": "CL=F", "category": "Matières premières"},
+    {"name": "Brent Oil", "symbol": "BZ=F", "category": "Matières premières"},
+    {"name": "Natural Gas", "symbol": "NG=F", "category": "Matières premières"},
+    {"name": "Corn Futures", "symbol": "ZC=F", "category": "Matières premières"},
+    {"name": "Soybean Futures", "symbol": "ZS=F", "category": "Matières premières"},
+]
+
+
+BASE_ASSETS = {asset["name"]: asset["symbol"] for asset in POPULAR_ASSETS}
+ASSET_METADATA = {asset["symbol"]: asset for asset in POPULAR_ASSETS}
 
 
 def safe_number(value, decimals=2, suffix=""):
@@ -552,8 +655,17 @@ def format_int(value):
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_catalog():
     rows = []
-    for name, symbol_value in BASE_ASSETS.items():
-        rows.append({"name": name, "symbol": symbol_value, "type": "Catalogue"})
+    for priority, asset in enumerate(POPULAR_ASSETS):
+        rows.append(
+            {
+                "name": asset["name"],
+                "symbol": asset["symbol"],
+                "category": asset["category"],
+                "type": asset["category"],
+                "source": "Populaire",
+                "priority": priority,
+            }
+        )
 
     sources = [
         (
@@ -577,19 +689,115 @@ def load_catalog():
             df = pd.read_csv(io.StringIO(response.text), sep="|")
             if "Test Issue" in df.columns:
                 df = df[df["Test Issue"] == "N"]
-            for _, row in df.head(1500).iterrows():
+            for offset, (_, row) in enumerate(df.head(1500).iterrows()):
                 symbol_value = str(row.get(symbol_col, "")).replace(".", "-").strip()
                 asset_name = str(row.get(name_col, "")).strip()
                 if symbol_value and symbol_value.lower() != "nan" and asset_name:
-                    rows.append({"name": asset_name, "symbol": symbol_value, "type": market_type})
+                    rows.append(
+                        {
+                            "name": asset_name,
+                            "symbol": symbol_value,
+                            "category": "Actions US",
+                            "type": "Actions US",
+                            "source": market_type,
+                            "priority": 1000 + offset,
+                        }
+                    )
         except Exception:
             continue
 
     catalog_df = pd.DataFrame(rows).dropna()
     catalog_df = catalog_df[catalog_df["symbol"].astype(str).str.len() > 0]
     catalog_df = catalog_df.drop_duplicates("symbol")
-    catalog_df = catalog_df.sort_values(["type", "name"], kind="stable").reset_index(drop=True)
+    catalog_df = catalog_df.sort_values(["priority", "category", "name"], kind="stable").reset_index(drop=True)
     return catalog_df
+
+
+def asset_label(row):
+    return f"{row['symbol']} — {row['name']} [{row['category']}]"
+
+
+def popular_slice(catalog_df, category="Tous", limit=60):
+    popular = catalog_df[catalog_df["priority"] < 1000]
+    if category != "Tous":
+        popular = popular[popular["category"] == category]
+    if popular.empty:
+        popular = catalog_df if category == "Tous" else catalog_df[catalog_df["category"] == category]
+    return popular.sort_values(["priority", "name"], kind="stable").head(limit)
+
+
+def filter_catalog(catalog_df, category="Tous", query="", limit=80):
+    scoped = catalog_df if category == "Tous" else catalog_df[catalog_df["category"] == category]
+    if scoped.empty:
+        return popular_slice(catalog_df, "Tous", limit), True
+
+    q = str(query or "").lower().strip()
+    if not q:
+        return scoped.sort_values(["priority", "name"], kind="stable").head(limit), False
+
+    filtered = scoped[
+        scoped["name"].str.lower().str.contains(q, na=False, regex=False)
+        | scoped["symbol"].str.lower().str.contains(q, na=False, regex=False)
+        | scoped["category"].str.lower().str.contains(q, na=False, regex=False)
+    ]
+    if filtered.empty:
+        return popular_slice(catalog_df, category, limit), True
+    return filtered.sort_values(["priority", "name"], kind="stable").head(limit), False
+
+
+def reset_asset_search():
+    st.session_state.asset_category = "Tous"
+    st.session_state.asset_search_text = ""
+    st.session_state.selected_asset_symbol = "AAPL"
+
+
+def fallback_currency(symbol):
+    if symbol.endswith(".PA") or symbol in {"^FCHI", "^GDAXI", "^STOXX50E", "EURUSD=X", "EURGBP=X"}:
+        return "EUR"
+    if symbol.endswith("=X"):
+        return "USD"
+    return "USD"
+
+
+def build_fallback_history(symbol):
+    end = pd.Timestamp.utcnow().normalize()
+    index = pd.bdate_range(end=end, periods=126)
+    if index.empty:
+        return pd.DataFrame()
+
+    seed = sum((idx + 1) * ord(char) for idx, char in enumerate(symbol))
+    base_price = {
+        "AAPL": 190,
+        "MSFT": 420,
+        "NVDA": 950,
+        "BTC-USD": 65000,
+        "ETH-USD": 3400,
+        "SPY": 520,
+        "EURUSD=X": 1.08,
+        "GC=F": 2350,
+    }.get(symbol, 40 + (seed % 420))
+
+    rows = []
+    for idx, date_value in enumerate(index):
+        wave = ((idx % 19) - 9) / 900
+        drift = (idx - len(index) / 2) / 4200
+        close_value = max(base_price * (1 + wave + drift + ((seed % 11) - 5) / 3000), 0.01)
+        open_value = close_value * (1 - ((idx % 5) - 2) / 1200)
+        high_value = max(open_value, close_value) * 1.006
+        low_value = min(open_value, close_value) * 0.994
+        rows.append(
+            {
+                "Open": open_value,
+                "High": high_value,
+                "Low": low_value,
+                "Close": close_value,
+                "Volume": int(750000 + (seed % 900000) + idx * 1200),
+            }
+        )
+
+    data = pd.DataFrame(rows, index=index)
+    data.attrs["is_fallback"] = True
+    return data
 
 
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -603,7 +811,7 @@ def get_history(symbol):
             auto_adjust=False,
         )
         if data is None or data.empty:
-            return pd.DataFrame()
+            return build_fallback_history(symbol)
 
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
@@ -614,9 +822,12 @@ def get_history(symbol):
                 data[column] = pd.to_numeric(data[column], errors="coerce")
 
         data = data.dropna(subset=["Close"])
+        if data.empty:
+            return build_fallback_history(symbol)
+        data.attrs["is_fallback"] = False
         return data
     except Exception:
-        return pd.DataFrame()
+        return build_fallback_history(symbol)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -627,7 +838,12 @@ def get_info(symbol):
             return info
         return {}
     except Exception:
-        return {}
+        asset = ASSET_METADATA.get(symbol, {})
+        return {
+            "shortName": asset.get("name", symbol),
+            "quoteType": asset.get("category", "N/D"),
+            "currency": fallback_currency(symbol),
+        }
 
 
 def money(x):
@@ -695,6 +911,12 @@ catalog = load_catalog()
 
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = []
+if "asset_category" not in st.session_state:
+    st.session_state.asset_category = "Tous"
+if "asset_search_text" not in st.session_state:
+    st.session_state.asset_search_text = ""
+if "selected_asset_symbol" not in st.session_state:
+    st.session_state.selected_asset_symbol = "AAPL"
 
 with st.sidebar:
     st.markdown('<div class="neon-title">Stock Insight</div>', unsafe_allow_html=True)
@@ -702,36 +924,60 @@ with st.sidebar:
     st.caption("Radar financier cyberpunk sans API payante")
     st.markdown("---")
 
-    query = st.text_input("🔎 Recherche action / crypto / ETF / forex", "Apple")
-    st.button("Lancer la recherche", key="launch_search")
-    q = query.lower().strip()
+    st.selectbox(
+        "Catégorie d'actifs",
+        CATEGORIES,
+        key="asset_category",
+        help="Filtre la palette avant de choisir un actif.",
+    )
+    query = st.text_input(
+        "🔎 Filtrer la palette",
+        key="asset_search_text",
+        placeholder="Nom, symbole, crypto, ETF, forex...",
+        help="Laisse vide pour afficher une liste prête à sélectionner.",
+    )
 
-    if q:
-        filtered = catalog[
-            catalog["name"].str.lower().str.contains(q, na=False)
-            | catalog["symbol"].str.lower().str.contains(q, na=False)
-        ].head(60)
-    else:
-        filtered = catalog.head(60)
-
+    filtered, used_popular_fallback = filter_catalog(catalog, st.session_state.asset_category, query)
     if filtered.empty:
-        filtered = catalog.head(40)
+        filtered = popular_slice(catalog, "Tous", 60)
+        used_popular_fallback = True
+
+    labels = filtered.apply(asset_label, axis=1).tolist()
+    symbol_by_label = dict(zip(labels, filtered["symbol"].tolist()))
+    previous_symbol = st.session_state.get("selected_asset_symbol", "AAPL")
+    default_index = 0
+    if previous_symbol in filtered["symbol"].tolist():
+        default_index = filtered["symbol"].tolist().index(previous_symbol)
+
+    selected_label = st.selectbox(
+        "🎛️ Palette de marché",
+        labels,
+        index=default_index,
+        help="Sélecteur principal : ouvre la liste ou tape directement pour chercher dans les résultats.",
+    )
+    symbol = symbol_by_label.get(selected_label, "AAPL")
+    st.session_state.selected_asset_symbol = symbol
+
+    if used_popular_fallback:
         st.markdown(
-            '<div class="data-missing">Aucun signal dans le catalogue pour cette recherche. '
-            "Affichage des premiers actifs disponibles.</div>",
+            '<div class="notice">Aucun actif exact trouvé. La palette affiche les actifs populaires '
+            "pour garder la navigation fluide.</div>",
             unsafe_allow_html=True,
         )
 
-    labels = filtered.apply(lambda r: f"{r['symbol']} — {r['name']} [{r['type']}]", axis=1).tolist()
-    selected_label = st.selectbox("Palette de marché", labels)
-    symbol = selected_label.split(" — ")[0].strip()
+    col_launch, col_reset = st.columns([1, 1])
+    with col_launch:
+        if st.button("Lancer la recherche", key="launch_search"):
+            st.toast(f"Palette verrouillée sur {symbol}", icon="🎛️")
+    with col_reset:
+        st.button("Réinitialiser la recherche", key="reset_asset_search", on_click=reset_asset_search)
 
     scanner_clicked = st.button("⚡ Scanner l’actif", key="scan_asset")
     if scanner_clicked:
         st.toast(f"Scan néon lancé pour {symbol}", icon="⚡")
 
     st.markdown("---")
-    st.caption(f"Catalogue chargé : {len(catalog)} actifs")
+    st.caption(f"Catalogue chargé : {len(catalog)} actifs · affichés : {len(filtered)}")
     st.caption("Historique cache : 2h · Catalogue : 24h")
     st.caption("Sons : activés après interaction utilisateur")
 
@@ -740,12 +986,15 @@ hist = get_history(symbol)
 info = get_info(symbol)
 close = get_close_series(hist)
 data_available = not close.empty
+history_is_fallback = bool(getattr(hist, "attrs", {}).get("is_fallback", False))
+selected_asset = ASSET_METADATA.get(symbol, {})
 
-name = info.get("longName") or info.get("shortName") or symbol
+name = info.get("longName") or info.get("shortName") or selected_asset.get("name") or symbol
 sector = info.get("sector", "N/D")
 industry = info.get("industry", "N/D")
 country = info.get("country", "N/D")
-currency = info.get("currency", "USD")
+currency = info.get("currency") or fallback_currency(symbol)
+asset_type = info.get("quoteType") or selected_asset.get("category") or "N/D"
 price = float(close.iloc[-1]) if data_available else None
 previous = float(close.iloc[-2]) if len(close) > 1 else price
 change = ((price - previous) / previous) * 100 if price is not None and previous else None
@@ -768,6 +1017,12 @@ st.caption(f"{symbol} · {sector} · {industry} · {country}")
 
 if not data_available:
     unavailable_box()
+elif history_is_fallback:
+    st.markdown(
+        '<div class="notice">Mode continuité activé : Yahoo Finance est indisponible ou incomplet pour cet actif. '
+        "L'interface reste utilisable avec une série locale indicative, sans bloquer l'application.</div>",
+        unsafe_allow_html=True,
+    )
 
 tabs = st.tabs(
     [
@@ -815,7 +1070,7 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("🌍 Marché")
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f"**Type :** {info.get('quoteType', 'N/D')}")
+    st.write(f"**Type :** {asset_type}")
     st.write(f"**Devise :** {currency}")
     st.write(f"**Exchange :** {info.get('exchange', 'N/D')}")
     st.write(f"**Fuseau marché :** {info.get('exchangeTimezoneName', 'N/D')}")
@@ -1072,7 +1327,7 @@ with tabs[7]:
         unsafe_allow_html=True,
     )
     url = f"https://s.tradingview.com/widgetembed/?symbol={tv_symbol(symbol)}&interval=D&theme=dark&style=1&locale=fr"
-    components.iframe(url, height=620, scrolling=True)
+    components.iframe(url, height=620, scrolling=False)
 
 with tabs[8]:
     st.subheader("⭐ Watchlist futuriste")
