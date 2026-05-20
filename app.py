@@ -11,6 +11,14 @@ import streamlit.components.v1 as components
 import yfinance as yf
 
 
+TOUCH_STABLE_PLOTLY_CONFIG = {
+    "displayModeBar": False,
+    "scrollZoom": False,
+    "doubleClick": False,
+    "responsive": True,
+}
+
+
 st.set_page_config(page_title="Stock Insight Neon", page_icon="📈", layout="wide")
 
 
@@ -1481,13 +1489,18 @@ with tabs[2]:
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(2,6,23,.85)",
             height=560,
+            dragmode=False,
             xaxis_rangeslider_visible=False,
             margin=dict(l=10, r=10, t=30, b=10),
             font=dict(color="#e5e7eb"),
         )
-        fig.update_xaxes(gridcolor="rgba(34,211,238,.10)")
-        fig.update_yaxes(gridcolor="rgba(34,211,238,.10)")
-        st.plotly_chart(fig, use_container_width=True)
+        fig.update_xaxes(
+            gridcolor="rgba(34,211,238,.10)",
+            fixedrange=True,
+            range=[hist.index.min(), hist.index.max()],
+        )
+        fig.update_yaxes(gridcolor="rgba(34,211,238,.10)", fixedrange=True)
+        st.plotly_chart(fig, use_container_width=True, config=TOUCH_STABLE_PLOTLY_CONFIG)
 
         perf = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100 if close.iloc[0] else 0
         st.markdown(
