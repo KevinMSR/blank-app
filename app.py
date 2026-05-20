@@ -547,19 +547,6 @@ def render_analysis_audio_layer(asset_name, symbol):
     return STATE.ctx;
   }
 
-  function makeOsc(type, frequency, gainValue, destination) {
-    const ctx = STATE.ctx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(frequency, ctx.currentTime);
-    gain.gain.setValueAtTime(gainValue, ctx.currentTime);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start();
-    return { osc: osc, gain: gain };
-  }
-
   function makeNoise(seconds) {
     const ctx = STATE.ctx;
     const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
