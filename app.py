@@ -1,5 +1,7 @@
 import io
 import json
+import time
+import threading
 from datetime import datetime
 
 import pandas as pd
@@ -10,7 +12,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
-
+# ============================================================
+# CONFIG
+# ============================================================
 TOUCH_STABLE_PLOTLY_CONFIG = {
     "displayModeBar": False,
     "scrollZoom": False,
@@ -18,12 +22,29 @@ TOUCH_STABLE_PLOTLY_CONFIG = {
     "responsive": True,
 }
 
+st.set_page_config(
+    page_title="Analyse Boursière Neon",
+    page_icon="📈",
+    layout="wide"
+)
 
-st.set_page_config(page_title="Stock Insight Neon", page_icon="📈", layout="wide")
+# ============================================================
+# API KEYS — from Streamlit secrets
+# ============================================================
+try:
+    FINNHUB_KEY = st.secrets["FINNHUB_KEY"]
+except Exception:
+    FINNHUB_KEY = ""
 
+try:
+    ALPHA_VANTAGE_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
+except Exception:
+    ALPHA_VANTAGE_KEY = ""
 
-st.markdown(
-    """
+# ============================================================
+# CSS
+# ============================================================
+st.markdown("""
 <style>
 :root {
     --neon-cyan:#22d3ee;
@@ -96,15 +117,6 @@ section[data-testid="stSidebar"] {
     box-shadow: 12px 0 42px rgba(34,211,238,.08);
 }
 
-section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-    gap:.55rem;
-}
-
-section[data-testid="stSidebar"] .stMarkdown,
-section[data-testid="stSidebar"] .stCaption {
-    margin-bottom:.15rem;
-}
-
 section[data-testid="stSidebar"] * { color:#f8fafc !important; }
 section[data-testid="stSidebar"] .stCaption { color:#cbd5e1 !important; }
 
@@ -157,15 +169,6 @@ a { color:#67e8f9 !important; }
     box-shadow:0 0 35px rgba(34,211,238,.12), inset 0 0 32px rgba(168,85,247,.04);
     backdrop-filter:blur(14px);
     margin-bottom:18px;
-}
-
-.card::before {
-    content:"";
-    position:absolute;
-    inset:0;
-    border-radius:22px;
-    pointer-events:none;
-    border-top:1px solid rgba(255,255,255,.08);
 }
 
 .kpi {
@@ -230,9 +233,7 @@ a { color:#67e8f9 !important; }
     font-size:12px;
 }
 
-div.stButton > button,
-button[kind="primary"],
-button[kind="secondary"] {
+div.stButton > button {
     background:linear-gradient(135deg,#06b6d4,#2563eb,#8b5cf6,#ec4899)!important;
     color:white!important;
     border:1px solid rgba(255,255,255,.18)!important;
@@ -254,8 +255,6 @@ div.stButton > button:hover {
     border-bottom:1px solid rgba(34,211,238,.18);
     overflow-x:auto;
     flex-wrap:wrap;
-    scrollbar-width:thin;
-    scrollbar-color:rgba(34,211,238,.55) rgba(15,23,42,.45);
 }
 
 .stTabs [data-baseweb="tab"] {
@@ -263,7 +262,6 @@ div.stButton > button:hover {
     border:1px solid rgba(34,211,238,.20);
     border-radius:12px 12px 0 0;
     color:#e5e7eb;
-    box-shadow:0 0 12px rgba(34,211,238,.06);
     min-height:42px;
     white-space:nowrap;
 }
@@ -279,7 +277,6 @@ input, textarea {
     color: #f8fafc !important;
     border: 1px solid rgba(34,211,238,.58) !important;
     border-radius: 14px !important;
-    box-shadow: inset 0 0 18px rgba(34,211,238,.06), 0 0 14px rgba(34,211,238,.08) !important;
 }
 
 input::placeholder, textarea::placeholder {
@@ -292,21 +289,12 @@ div[data-baseweb="select"] * {
 }
 
 div[data-baseweb="select"] > div,
-div[data-testid="stTextInput"] input,
-section[data-testid="stSidebar"] button {
+div[data-testid="stTextInput"] input {
     min-height:44px;
 }
 
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"],
-section[data-testid="stSidebar"] div[data-testid="stTextInput"],
-section[data-testid="stSidebar"] div.stButton {
-    margin-bottom:.35rem;
-}
-
 div[data-testid="stTextInput"] label,
-div[data-testid="stSelectbox"] label,
-div[data-testid="stMultiSelect"] label,
-div[data-testid="stSlider"] label {
+div[data-testid="stSelectbox"] label {
     color: #e5e7eb !important;
     font-weight:800 !important;
 }
@@ -316,21 +304,11 @@ div[data-testid="stMetric"] {
     border:1px solid rgba(34,211,238,.22);
     border-radius:18px;
     padding:18px;
-    box-shadow:0 0 20px rgba(34,211,238,.08);
 }
 
 div[data-testid="stMetric"] label { color:#bae6fd !important; }
-div[data-testid="stMetricValue"] { color:#f8fafc !important; }
 
-.stDataFrame, div[data-testid="stTable"] {
-    border:1px solid rgba(34,211,238,.22);
-    border-radius:16px;
-    overflow:hidden;
-}
-
-hr {
-    border-color:rgba(34,211,238,.18) !important;
-}
+hr { border-color:rgba(34,211,238,.18) !important; }
 
 .footer {
     color:#94a3b8;
@@ -340,1016 +318,402 @@ hr {
     margin-top:24px;
 }
 
+/* LIVE BADGE */
+.live-badge {
+    display:inline-block;
+    background:rgba(0,255,65,.15);
+    border:1px solid rgba(0,255,65,.4);
+    color:#00ff41;
+    font-size:10px;
+    font-family:"Courier New", monospace;
+    letter-spacing:2px;
+    padding:3px 10px;
+    border-radius:6px;
+    animation:livePulse 2s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0%,100% { opacity:1; }
+    50% { opacity:0.5; }
+}
+
 @media (max-width: 1024px) {
-    .block-container {
-        padding:1.1rem .8rem 2rem;
-    }
-
-    .neon-title {
-        font-size:34px;
-    }
-
-    .neon-subtitle {
-        letter-spacing:.10em;
-    }
-
-    .card {
-        padding:15px;
-        margin-bottom:12px;
-    }
-
-    .kpi {
-        padding:14px;
-        min-height:96px;
-    }
-
-    .kpi-value {
-        font-size:22px;
-    }
-
-    .stTabs [data-baseweb="tab-list"] {
-        flex-wrap:nowrap;
-        overflow-x:auto;
-        padding-bottom:4px;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        flex:0 0 auto;
-        padding:8px 12px;
-    }
+    .block-container { padding:1.1rem .8rem 2rem; }
+    .neon-title { font-size:34px; }
+    .kpi { padding:14px; min-height:96px; }
+    .kpi-value { font-size:22px; }
 }
 
 @media (max-width: 640px) {
-    .block-container {
-        padding:.8rem .55rem 1.5rem;
-    }
-
-    .neon-title {
-        font-size:28px;
-    }
-
-    .notice, .data-missing, .mini-chip {
-        padding:10px 12px;
-        margin-bottom:12px;
-    }
-
-    div[data-testid="stMetric"] {
-        padding:12px;
-    }
+    .block-container { padding:.8rem .55rem 1.5rem; }
+    .neon-title { font-size:28px; }
 }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
-
-def render_analysis_audio_layer(asset_name, symbol):
-    """Injects a browser-local cyberpunk analysis ambience and voice layer."""
-    audio_html = (
-        """
-<div id="stock-insight-analysis-audio-root"></div>
+# ============================================================
+# AUDIO SYSTEM — Improved cyberpunk music + action sounds
+# ============================================================
+def render_audio_system(asset_name, symbol):
+    audio_html = """
+<div id="stock-audio-root"></div>
 <script>
-(function () {
-  "use strict";
+(function() {
+"use strict";
 
-  const CONFIG = {
-    assetName: __ASSET_NAME__,
-    symbol: __SYMBOL__
-  };
-  const ROOT_KEY = "__stockInsightAnalysisAudio";
-  const PANEL_ID = "stock-insight-audio-panel";
-  const TOGGLE_ID = "stock-insight-audio-toggle";
-  const VOLUME_ID = "stock-insight-audio-volume";
-  const VOLUME_LABEL_ID = "stock-insight-audio-volume-label";
-  const STYLE_ID = "stock-insight-audio-style";
-  const VOLUME_LEVELS = ["low", "medium", "high"];
-  const VOLUME_LABELS = { low: "faible", medium: "moyen", high: "fort" };
-  const VOLUME_GAINS = { low: 0.58, medium: 0.86, high: 1.14 };
+var ROOT_KEY = "__stockAudio";
+var W = window.parent || window;
+var D = W.document || document;
+var S = W[ROOT_KEY] = W[ROOT_KEY] || {};
 
-  function getParentWindow() {
-    try {
-      if (window.parent) return window.parent;
-    } catch (e) {}
-    return window;
-  }
+S.assetName = __ASSET_NAME__;
+S.symbol = __SYMBOL__;
+S.ctx = S.ctx || null;
+S.playing = S.playing || false;
+S.enabled = S.enabled !== undefined ? S.enabled : true;
+S.volume = S.volume || "medium";
+S.master = S.master || null;
 
-  function getDoc(rootWindow) {
-    try {
-      if (rootWindow && rootWindow.document) return rootWindow.document;
-    } catch (e) {}
-    return document;
-  }
+var VOL = { low:0.04, medium:0.07, high:0.11 };
+var VOLS = ["low","medium","high"];
+var VLBL = { low:"faible", medium:"moyen", high:"fort" };
 
-  let rootWindow = getParentWindow();
-  let doc = getDoc(rootWindow);
-  let existingState;
-  let STATE;
-  try {
-    existingState = rootWindow[ROOT_KEY] || {};
-    rootWindow[ROOT_KEY] = existingState;
-    STATE = existingState;
-  } catch (e) {
-    rootWindow = window;
-    doc = document;
-    existingState = window[ROOT_KEY] || {};
-    window[ROOT_KEY] = existingState;
-    STATE = existingState;
-  }
+function getCtx() {
+    var AC = W.AudioContext || W.webkitAudioContext || window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!S.ctx || S.ctx.state === "closed") S.ctx = new AC();
+    if (S.ctx.state === "suspended") S.ctx.resume().catch(function(){});
+    return S.ctx;
+}
 
-  STATE.assetName = String(CONFIG.assetName || CONFIG.symbol || "selected asset").trim();
-  STATE.symbol = String(CONFIG.symbol || "").trim();
-  STATE.boundButtons = STATE.boundButtons || new WeakSet();
-  STATE.ctx = STATE.ctx || null;
-  STATE.ambient = STATE.ambient || null;
-  STATE.started = STATE.started || false;
-  STATE.storageLoaded = STATE.storageLoaded || false;
-  STATE.volumeLevel = STATE.volumeLevel || "medium";
+// ---- MAIN LAUNCH MUSIC ----
+function playLaunchMusic() {
+    var ctx = getCtx();
+    if (!ctx || !S.enabled) return;
+    var master = ctx.createGain();
+    var comp = ctx.createDynamicsCompressor();
+    master.gain.setValueAtTime(0.0001, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(VOL[S.volume], ctx.currentTime + 1.5);
+    master.connect(comp);
+    comp.connect(ctx.destination);
+    S.master = master;
 
-  function loadAmbientPreference() {
-    try {
-      const saved = rootWindow.localStorage.getItem("stockInsightAmbientEnabled");
-      return saved === null ? true : saved === "true";
-    } catch (e) {
-      return true;
-    }
-  }
-
-  function saveAmbientPreference() {
-    try {
-      rootWindow.localStorage.setItem("stockInsightAmbientEnabled", STATE.enabled ? "true" : "false");
-    } catch (e) {}
-  }
-
-  function loadVolumePreference() {
-    try {
-      const saved = rootWindow.localStorage.getItem("stockInsightAmbientVolume");
-      return VOLUME_LEVELS.includes(saved) ? saved : "medium";
-    } catch (e) {
-      return "medium";
-    }
-  }
-
-  function saveVolumePreference() {
-    try {
-      rootWindow.localStorage.setItem("stockInsightAmbientVolume", STATE.volumeLevel);
-    } catch (e) {}
-  }
-
-  if (!STATE.storageLoaded) {
-    STATE.enabled = loadAmbientPreference();
-    STATE.volumeLevel = loadVolumePreference();
-    STATE.storageLoaded = true;
-  } else if (typeof STATE.enabled !== "boolean") {
-    STATE.enabled = true;
-  }
-
-  if (!VOLUME_LEVELS.includes(STATE.volumeLevel)) {
-    STATE.volumeLevel = "medium";
-  }
-
-  function volumeMultiplier() {
-    return VOLUME_GAINS[STATE.volumeLevel] || VOLUME_GAINS.medium;
-  }
-
-  function masterTargetGain() {
-    return 0.042 * volumeMultiplier();
-  }
-
-  function applyVolume(seconds) {
-    if (!STATE.ambient || !STATE.ctx) return;
-    const ctx = STATE.ctx;
-    const now = ctx.currentTime;
-    const ramp = typeof seconds === "number" ? seconds : 0.28;
-    try {
-      STATE.ambient.master.gain.cancelScheduledValues(now);
-      STATE.ambient.master.gain.setValueAtTime(Math.max(STATE.ambient.master.gain.value, 0.0001), now);
-      STATE.ambient.master.gain.linearRampToValueAtTime(masterTargetGain(), now + ramp);
-    } catch (e) {}
-  }
-
-  function audioConstructor() {
-    return rootWindow.AudioContext || rootWindow.webkitAudioContext || window.AudioContext || window.webkitAudioContext;
-  }
-
-  function ensureAudio() {
-    const AudioContext = audioConstructor();
-    if (!AudioContext) return null;
-    if (!STATE.ctx || STATE.ctx.state === "closed") {
-      STATE.ctx = new AudioContext();
-    }
-    if (STATE.ctx.state === "suspended") {
-      try {
-        const resumeResult = STATE.ctx.resume();
-        if (resumeResult && resumeResult.catch) resumeResult.catch(function () {});
-      } catch (e) {}
-    }
-    STATE.started = true;
-    return STATE.ctx;
-  }
-
-  function makeNoise(seconds) {
-    const ctx = STATE.ctx;
-    const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
-    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < length; i += 1) {
-      data[i] = (Math.random() * 2 - 1) * 0.42;
-    }
-    return buffer;
-  }
-
-  function makeMetallicImpulse(seconds) {
-    const ctx = STATE.ctx;
-    const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
-    const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
-    for (let channel = 0; channel < 2; channel += 1) {
-      const data = buffer.getChannelData(channel);
-      for (let i = 0; i < length; i += 1) {
-        const t = i / ctx.sampleRate;
-        const decay = Math.pow(1 - i / length, 2.6);
-        const ring = Math.sin(t * 880 * Math.PI * 2) * 0.34 + Math.sin(t * 1327 * Math.PI * 2) * 0.22;
-        data[i] = ((Math.random() * 2 - 1) * 0.42 + ring) * decay * 0.28;
-      }
-    }
-    return buffer;
-  }
-
-  function createPan(value) {
-    const ctx = STATE.ctx;
-    if (ctx.createStereoPanner) {
-      const panner = ctx.createStereoPanner();
-      panner.pan.setValueAtTime(value, ctx.currentTime);
-      return panner;
-    }
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(1, ctx.currentTime);
-    return gain;
-  }
-
-  function startAmbience() {
-    const ctx = ensureAudio();
-    if (!ctx || !STATE.enabled || STATE.ambient) return;
-
-    const now = ctx.currentTime;
-    const tempo = 76;
-    const beat = 60 / tempo;
-    const bar = beat * 4;
-    const cycle = bar * 2;
-    const master = ctx.createGain();
-    const compressor = ctx.createDynamicsCompressor();
-    const ambienceBus = ctx.createGain();
-    const bassGain = ctx.createGain();
-    const rhythmBus = ctx.createGain();
-    const padBus = ctx.createGain();
-    const textureBus = ctx.createGain();
-    const effectsInput = ctx.createGain();
-    const reverbSend = ctx.createGain();
-    const convolver = ctx.createConvolver();
-    const reverbFilter = ctx.createBiquadFilter();
-    const reverbGain = ctx.createGain();
-    const delaySend = ctx.createGain();
-    const delay = ctx.createDelay(2.4);
-    const delayFilter = ctx.createBiquadFilter();
-    const delayFeedback = ctx.createGain();
-    const delayGain = ctx.createGain();
-    const nodes = [];
-    const timers = [];
-
-    master.gain.setValueAtTime(0.0001, now);
-    master.gain.linearRampToValueAtTime(masterTargetGain(), now + 2.4);
-    ambienceBus.gain.setValueAtTime(0.82, now);
-    bassGain.gain.setValueAtTime(0.96, now);
-    rhythmBus.gain.setValueAtTime(0.64, now);
-    padBus.gain.setValueAtTime(0.50, now);
-    textureBus.gain.setValueAtTime(0.36, now);
-    effectsInput.gain.setValueAtTime(0.78, now);
-    reverbSend.gain.setValueAtTime(0.13, now);
-    reverbGain.gain.setValueAtTime(0.20, now);
-    delaySend.gain.setValueAtTime(0.18, now);
-    delay.delayTime.setValueAtTime(beat * 0.75, now);
-    delayFeedback.gain.setValueAtTime(0.24, now);
-    delayGain.gain.setValueAtTime(0.17, now);
-
-    compressor.threshold.setValueAtTime(-25, now);
-    compressor.knee.setValueAtTime(16, now);
-    compressor.ratio.setValueAtTime(3.4, now);
-    compressor.attack.setValueAtTime(0.018, now);
-    compressor.release.setValueAtTime(0.46, now);
-    convolver.buffer = makeMetallicImpulse(1.9);
-    reverbFilter.type = "bandpass";
-    reverbFilter.frequency.setValueAtTime(720, now);
-    reverbFilter.Q.setValueAtTime(1.25, now);
-    delayFilter.type = "lowpass";
-    delayFilter.frequency.setValueAtTime(1280, now);
-    delayFilter.Q.setValueAtTime(0.8, now);
-
-    bassGain.connect(ambienceBus);
-    rhythmBus.connect(ambienceBus);
-    padBus.connect(ambienceBus);
-    textureBus.connect(ambienceBus);
-    ambienceBus.connect(compressor);
-    ambienceBus.connect(reverbSend);
-    padBus.connect(delaySend);
-    textureBus.connect(delaySend);
-    effectsInput.connect(compressor);
-    effectsInput.connect(reverbSend);
-    effectsInput.connect(delaySend);
-    delaySend.connect(delay);
-    delay.connect(delayFilter);
-    delayFilter.connect(delayFeedback);
-    delayFeedback.connect(delay);
-    delayFilter.connect(delayGain);
-    delayGain.connect(compressor);
-    reverbSend.connect(convolver);
-    convolver.connect(reverbFilter);
-    reverbFilter.connect(reverbGain);
-    reverbGain.connect(compressor);
-    compressor.connect(master);
-    master.connect(ctx.destination);
-
-    function rememberInterval(handler, milliseconds) {
-      const id = rootWindow.setInterval(handler, milliseconds);
-      timers.push({ type: "interval", id: id });
-      return id;
-    }
-
-    function rememberTimeout(handler, milliseconds) {
-      const id = rootWindow.setTimeout(handler, milliseconds);
-      timers.push({ type: "timeout", id: id });
-      return id;
-    }
-
-    function env(gainParam, start, peak, attack, hold, release) {
-      const safePeak = Math.max(0.0002, peak);
-      gainParam.cancelScheduledValues(start);
-      gainParam.setValueAtTime(0.0001, start);
-      gainParam.linearRampToValueAtTime(safePeak, start + attack);
-      gainParam.setValueAtTime(safePeak * 0.82, start + attack + hold);
-      gainParam.exponentialRampToValueAtTime(0.0001, start + attack + hold + release);
-    }
-
-    function connectPanned(node, panValue, destination) {
-      const pan = createPan(panValue);
-      node.connect(pan);
-      pan.connect(destination);
-      return pan;
-    }
-
-    function stopSource(source, stopAt) {
-      try {
-        source.stop(stopAt);
-      } catch (e) {}
-    }
-
-    function scheduleBass(note, start, length, velocity) {
-      const sub = ctx.createOscillator();
-      const body = ctx.createOscillator();
-      const subGain = ctx.createGain();
-      const bodyGain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      const amp = ctx.createGain();
-      sub.type = "sine";
-      body.type = "sawtooth";
-      sub.frequency.setValueAtTime(note, start);
-      body.frequency.setValueAtTime(note * 2.01, start);
-      body.detune.setValueAtTime(-6, start);
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(118, start);
-      filter.frequency.linearRampToValueAtTime(174, start + 0.08);
-      filter.frequency.exponentialRampToValueAtTime(92, start + length + 0.12);
-      filter.Q.setValueAtTime(1.2, start);
-      subGain.gain.setValueAtTime(0.13 * velocity, start);
-      bodyGain.gain.setValueAtTime(0.030 * velocity, start);
-      env(amp.gain, start, 1, 0.026, Math.max(0.05, length * 0.42), Math.max(0.18, length * 0.55));
-      sub.connect(subGain);
-      body.connect(bodyGain);
-      subGain.connect(filter);
-      bodyGain.connect(filter);
-      filter.connect(amp);
-      amp.connect(bassGain);
-      sub.start(start);
-      body.start(start);
-      stopSource(sub, start + length + 0.38);
-      stopSource(body, start + length + 0.38);
-    }
-
-    function scheduleKick(start, strong) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(strong ? 52 : 46, start);
-      osc.frequency.exponentialRampToValueAtTime(28, start + 0.36);
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(126, start);
-      filter.Q.setValueAtTime(0.72, start);
-      env(gain.gain, start, strong ? 0.16 : 0.105, 0.012, 0.038, 0.38);
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(rhythmBus);
-      osc.start(start);
-      stopSource(osc, start + 0.54);
-    }
-
-    function scheduleTacticalClick(start, panValue, accent) {
-      const noise = ctx.createBufferSource();
-      const toneOsc = ctx.createOscillator();
-      const noiseGain = ctx.createGain();
-      const toneGain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      const sum = ctx.createGain();
-      noise.buffer = makeNoise(0.16);
-      toneOsc.type = "triangle";
-      toneOsc.frequency.setValueAtTime(accent ? 1180 : 760, start);
-      toneOsc.frequency.exponentialRampToValueAtTime(accent ? 520 : 430, start + 0.09);
-      filter.type = "bandpass";
-      filter.frequency.setValueAtTime(accent ? 1850 : 1380, start);
-      filter.Q.setValueAtTime(7.5, start);
-      env(noiseGain.gain, start, accent ? 0.016 : 0.010, 0.006, 0.018, 0.075);
-      env(toneGain.gain, start, accent ? 0.018 : 0.012, 0.006, 0.022, 0.11);
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      toneOsc.connect(toneGain);
-      noiseGain.connect(sum);
-      toneGain.connect(sum);
-      connectPanned(sum, panValue, rhythmBus);
-      noise.start(start);
-      toneOsc.start(start);
-      stopSource(noise, start + 0.18);
-      stopSource(toneOsc, start + 0.18);
-    }
-
-    function schedulePadChord(chord, start, chordIndex) {
-      const duration = cycle + 1.65;
-      chord.forEach(function (note, index) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const filter = ctx.createBiquadFilter();
-        const panValue = [-0.42, 0.38, -0.12, 0.18, 0.48][index % 5];
-        osc.type = index % 2 ? "triangle" : "sawtooth";
-        osc.frequency.setValueAtTime(note, start);
-        osc.detune.setValueAtTime((index - 1.5) * 5 + (chordIndex % 2 ? 3 : -2), start);
-        filter.type = "lowpass";
-        filter.frequency.setValueAtTime(360 + chordIndex * 34 + index * 24, start);
-        filter.frequency.linearRampToValueAtTime(650 + index * 38, start + duration * 0.42);
-        filter.frequency.exponentialRampToValueAtTime(390 + index * 30, start + duration - 0.2);
-        filter.Q.setValueAtTime(0.9, start);
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.linearRampToValueAtTime(0.010 - index * 0.0009, start + 1.45 + index * 0.18);
-        gain.gain.linearRampToValueAtTime(0.0065 - index * 0.00055, start + duration * 0.68);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-        osc.connect(filter);
-        filter.connect(gain);
-        connectPanned(gain, panValue, padBus);
-        osc.start(start);
-        stopSource(osc, start + duration + 0.08);
-      });
-    }
-
-    function scheduleTechAccent(freq, start, panValue, length, gainValue) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      osc.type = "square";
-      osc.frequency.setValueAtTime(freq, start);
-      osc.frequency.exponentialRampToValueAtTime(freq * 0.74, start + length);
-      filter.type = "bandpass";
-      filter.frequency.setValueAtTime(freq * 1.55, start);
-      filter.Q.setValueAtTime(8.5, start);
-      env(gain.gain, start, gainValue, 0.012, length * 0.18, length * 0.82);
-      osc.connect(filter);
-      filter.connect(gain);
-      connectPanned(gain, panValue, textureBus);
-      osc.start(start);
-      stopSource(osc, start + length + 0.05);
-    }
-
-    function scheduleTransition(start, cycleIndex) {
-      const sweep = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      const pan = createPan(cycleIndex % 2 ? -0.32 : 0.32);
-      sweep.type = "sawtooth";
-      sweep.frequency.setValueAtTime(96, start);
-      sweep.frequency.exponentialRampToValueAtTime(410, start + 1.05);
-      filter.type = "bandpass";
-      filter.frequency.setValueAtTime(260, start);
-      filter.frequency.linearRampToValueAtTime(920, start + 1.05);
-      filter.Q.setValueAtTime(6.2, start);
-      env(gain.gain, start, 0.024, 0.08, 0.35, 0.72);
-      sweep.connect(filter);
-      filter.connect(gain);
-      gain.connect(pan);
-      pan.connect(textureBus);
-      sweep.start(start);
-      stopSource(sweep, start + 1.2);
-    }
-
-    const padPulse = ctx.createOscillator();
-    const padPulseDepth = ctx.createGain();
-    padPulse.type = "sine";
-    padPulse.frequency.setValueAtTime(0.031, now);
-    padPulseDepth.gain.setValueAtTime(0.055, now);
-    padPulse.connect(padPulseDepth);
-    padPulseDepth.connect(padBus.gain);
-    padPulse.start();
-    nodes.push({ osc: padPulse, gain: padPulseDepth });
-
-    const tensionOsc = ctx.createOscillator();
-    const tensionGain = ctx.createGain();
-    const tensionFilter = ctx.createBiquadFilter();
-    tensionOsc.type = "sawtooth";
-    tensionOsc.frequency.setValueAtTime(58, now);
-    tensionFilter.type = "bandpass";
-    tensionFilter.frequency.setValueAtTime(360, now);
-    tensionFilter.Q.setValueAtTime(4.4, now);
-    tensionGain.gain.setValueAtTime(0.0001, now);
-    tensionOsc.connect(tensionFilter);
-    tensionFilter.connect(tensionGain);
-    tensionGain.connect(textureBus);
-    tensionOsc.start();
-    nodes.push({ osc: tensionOsc, gain: tensionGain });
-
-    const chordProgression = [
-      [87.31, 130.81, 174.61, 261.63],
-      [69.30, 103.83, 138.59, 207.65],
-      [77.78, 116.54, 155.56, 233.08],
-      [65.41, 98.00, 130.81, 196.00]
-    ];
-    const bassPattern = [
-      { beat: 0, note: 43.65, length: 0.78, velocity: 1.00 },
-      { beat: 1.5, note: 43.65, length: 0.42, velocity: 0.64 },
-      { beat: 2.5, note: 51.91, length: 0.52, velocity: 0.72 },
-      { beat: 3.5, note: 58.27, length: 0.44, velocity: 0.58 },
-      { beat: 4, note: 38.89, length: 0.82, velocity: 0.94 },
-      { beat: 5.5, note: 43.65, length: 0.45, velocity: 0.66 },
-      { beat: 6, note: 51.91, length: 0.58, velocity: 0.72 },
-      { beat: 7.25, note: 65.41, length: 0.38, velocity: 0.54 }
-    ];
-    const accents = [
-      { beat: 0.75, freq: 523.25, pan: -0.48 },
-      { beat: 2.25, freq: 392.00, pan: 0.36 },
-      { beat: 3.75, freq: 466.16, pan: -0.18 },
-      { beat: 5.25, freq: 622.25, pan: 0.46 },
-      { beat: 6.75, freq: 349.23, pan: -0.36 }
-    ];
-    let cycleIndex = 0;
-
-    function scheduleCycle() {
-      if (!STATE.ambient || !STATE.enabled || !STATE.ctx) return;
-      const start = ctx.currentTime + 0.08;
-      const chord = chordProgression[cycleIndex % chordProgression.length];
-      schedulePadChord(chord, start, cycleIndex);
-      bassPattern.forEach(function (step) {
-        scheduleBass(step.note, start + step.beat * beat, step.length * beat, step.velocity);
-      });
-      [0, 2, 4, 6].forEach(function (beatNumber) {
-        scheduleKick(start + beatNumber * beat, beatNumber === 0 || beatNumber === 4);
-      });
-      [1, 3, 5, 7].forEach(function (beatNumber, index) {
-        scheduleTacticalClick(start + beatNumber * beat, index % 2 ? 0.30 : -0.28, beatNumber === 5);
-      });
-      accents.forEach(function (step, index) {
-        const rotate = (index + cycleIndex) % accents.length;
-        scheduleTechAccent(
-          accents[rotate].freq,
-          start + step.beat * beat,
-          accents[rotate].pan,
-          0.16 + (index % 2) * 0.05,
-          0.016 + (index === 3 ? 0.006 : 0)
-        );
-      });
-      if (cycleIndex % 2 === 1) {
-        scheduleTransition(start + 7.15 * beat, cycleIndex);
-      }
-      try {
-        textureBus.gain.cancelScheduledValues(start);
-        textureBus.gain.setValueAtTime(textureBus.gain.value || 0.36, start);
-        textureBus.gain.linearRampToValueAtTime(cycleIndex % 3 === 2 ? 0.44 : 0.34, start + cycle * 0.55);
-        textureBus.gain.linearRampToValueAtTime(0.36, start + cycle - 0.1);
-      } catch (e) {}
-      cycleIndex += 1;
-    }
-
-    STATE.ambient = {
-      master: master,
-      nodes: nodes,
-      timers: timers,
-      bassGain: bassGain,
-      rhythmBus: rhythmBus,
-      padBus: padBus,
-      textureBus: textureBus,
-      tensionGain: tensionGain,
-      effectsInput: effectsInput
-    };
-
-    scheduleCycle();
-    rememberInterval(scheduleCycle, Math.floor(cycle * 1000));
-    rememberInterval(function () {
-      if (!STATE.ambient || !STATE.enabled || !STATE.ctx) return;
-      const modNow = ctx.currentTime;
-      try {
-        delayFeedback.gain.cancelScheduledValues(modNow);
-        delayFeedback.gain.setValueAtTime(delayFeedback.gain.value || 0.24, modNow);
-        delayFeedback.gain.linearRampToValueAtTime(0.18 + Math.random() * 0.12, modNow + 3.2);
-      } catch (e) {}
-      try {
-        reverbFilter.frequency.cancelScheduledValues(modNow);
-        reverbFilter.frequency.setValueAtTime(reverbFilter.frequency.value || 720, modNow);
-        reverbFilter.frequency.linearRampToValueAtTime(620 + Math.random() * 360, modNow + 4.8);
-      } catch (e) {}
-    }, Math.floor(cycle * 2000));
-    rememberTimeout(function () {
-      if (STATE.ambient && STATE.enabled) scheduleTransition(ctx.currentTime + 0.1, 0);
-    }, 640);
-
-    updateToggleButton();
-  }
-
-  function stopAmbience() {
-    if (!STATE.ambient || !STATE.ctx) return;
-    const ctx = STATE.ctx;
-    const now = ctx.currentTime;
-    const ambient = STATE.ambient;
-    try {
-      ambient.master.gain.cancelScheduledValues(now);
-      ambient.master.gain.setValueAtTime(Math.max(ambient.master.gain.value, 0.0001), now);
-      ambient.master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-    } catch (e) {}
-    if (ambient.timers) {
-      ambient.timers.forEach(function (timer) {
-        try {
-          if (timer.type === "timeout") {
-            rootWindow.clearTimeout(timer.id);
-          } else {
-            rootWindow.clearInterval(timer.id);
-          }
-        } catch (e) {}
-      });
-    }
-    ambient.nodes.forEach(function (node) {
-      try {
-        node.osc.stop(now + 0.52);
-      } catch (e) {}
+    // Bass drone
+    [27.5, 32.7, 41.2].forEach(function(freq, i) {
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        var f = ctx.createBiquadFilter();
+        o.type = "sawtooth";
+        o.frequency.value = freq;
+        f.type = "lowpass";
+        f.frequency.value = 200;
+        g.gain.value = 0.35 - i*0.08;
+        o.connect(f); f.connect(g); g.connect(master);
+        o.start();
+        // LFO
+        var lfo = ctx.createOscillator();
+        var lg = ctx.createGain();
+        lfo.frequency.value = 0.05 + i*0.02;
+        lg.gain.value = 0.08;
+        lfo.connect(lg); lg.connect(g.gain);
+        lfo.start();
     });
-    window.setTimeout(function () {
-      try {
-        ambient.master.disconnect();
-      } catch (e) {}
-      ambient.nodes.forEach(function (node) {
-        try {
-          node.osc.disconnect();
-        } catch (e) {}
-      });
-    }, 620);
-    STATE.ambient = null;
-    updateToggleButton();
-  }
 
-  function connectEffectOutput(node) {
-    if (STATE.ambient && STATE.ambient.effectsInput) {
-      node.connect(STATE.ambient.effectsInput);
-    } else if (STATE.ctx) {
-      node.connect(STATE.ctx.destination);
-    }
-  }
+    // Synth pads — Vangelis style
+    var chords = [
+        [130.81, 164.81, 196.00, 261.63],
+        [110.00, 138.59, 174.61, 220.00],
+        [146.83, 185.00, 220.00, 293.66]
+    ];
 
-  function boostAmbienceForScan() {
-    if (!STATE.ambient || !STATE.ctx) return;
-    const ctx = STATE.ctx;
-    const now = ctx.currentTime;
-    try {
-      STATE.ambient.bassGain.gain.cancelScheduledValues(now);
-      STATE.ambient.bassGain.gain.setValueAtTime(Math.max(STATE.ambient.bassGain.gain.value, 1), now);
-      STATE.ambient.bassGain.gain.linearRampToValueAtTime(1.34, now + 0.16);
-      STATE.ambient.bassGain.gain.linearRampToValueAtTime(1.08, now + 2.15);
-      STATE.ambient.bassGain.gain.linearRampToValueAtTime(1, now + 3.4);
-    } catch (e) {}
-    try {
-      STATE.ambient.tensionGain.gain.cancelScheduledValues(now);
-      STATE.ambient.tensionGain.gain.setValueAtTime(0.0001, now);
-      STATE.ambient.tensionGain.gain.exponentialRampToValueAtTime(0.048, now + 0.92);
-      STATE.ambient.tensionGain.gain.exponentialRampToValueAtTime(0.0001, now + 3.2);
-    } catch (e) {}
-  }
-
-  function tone(options) {
-    const ctx = ensureAudio();
-    if (!ctx) return;
-    const now = ctx.currentTime + (options.delay || 0);
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    osc.type = options.type || "sine";
-    osc.frequency.setValueAtTime(Math.max(1, options.freq), now);
-    if (options.endFreq) {
-      osc.frequency.exponentialRampToValueAtTime(Math.max(1, options.endFreq), now + options.duration);
-    }
-    filter.type = options.filterType || "lowpass";
-    filter.frequency.setValueAtTime(options.filterFreq || 480, now);
-    filter.Q.setValueAtTime(options.q || 1, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(options.gain || 0.045, now + 0.018);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + options.duration);
-    osc.connect(filter);
-    filter.connect(gain);
-    connectEffectOutput(gain);
-    osc.start(now);
-    osc.stop(now + options.duration + 0.04);
-  }
-
-  function noiseHit(delay, duration, gainValue, filterFreq) {
-    const ctx = ensureAudio();
-    if (!ctx) return;
-    const now = ctx.currentTime + (delay || 0);
-    const source = ctx.createBufferSource();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    source.buffer = makeNoise(Math.max(duration, 0.12));
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(filterFreq || 120, now);
-    filter.Q.setValueAtTime(5, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(gainValue || 0.055, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    source.connect(filter);
-    filter.connect(gain);
-    connectEffectOutput(gain);
-    source.start(now);
-    source.stop(now + duration + 0.03);
-  }
-
-  function terminalEffect() {
-    const freqs = [96, 128, 172, 244, 188, 132, 282, 218];
-    freqs.forEach(function (freq, index) {
-      tone({
-        freq: freq,
-        endFreq: freq * 0.96,
-        delay: 0.08 + index * 0.055,
-        duration: 0.07,
-        type: index % 2 ? "square" : "sawtooth",
-        gain: 0.018,
-        filterType: "bandpass",
-        filterFreq: freq * 1.8,
-        q: 7
-      });
-    });
-    noiseHit(0.12, 0.42, 0.030, 520);
-  }
-
-  function scanImpactAndRise() {
-    startAmbience();
-    boostAmbienceForScan();
-    tone({ freq: 46, endFreq: 24, delay: 0, duration: 0.86, type: "sine", gain: 0.19, filterFreq: 135 });
-    tone({ freq: 78, endFreq: 42, delay: 0.018, duration: 0.54, type: "triangle", gain: 0.074, filterFreq: 210 });
-    noiseHit(0, 0.32, 0.082, 90);
-    tone({ freq: 58, endFreq: 390, delay: 0.14, duration: 1.45, type: "sawtooth", gain: 0.068, filterType: "bandpass", filterFreq: 470, q: 6 });
-    tone({ freq: 118, endFreq: 980, delay: 0.30, duration: 1.08, type: "sawtooth", gain: 0.028, filterType: "bandpass", filterFreq: 760, q: 9 });
-    terminalEffect();
-  }
-
-  function pickVoice(synthWindow) {
-    try {
-      const voices = synthWindow.speechSynthesis.getVoices() || [];
-      if (!voices.length) return null;
-      const preferred = ["daniel", "alex", "fred", "google uk english male", "google us english", "microsoft david"];
-      for (const token of preferred) {
-        const match = voices.find(function (voice) {
-          return voice.name && voice.name.toLowerCase().includes(token);
+    chords.forEach(function(chord, ci) {
+        var startTime = ctx.currentTime + ci * 4;
+        chord.forEach(function(note, ni) {
+            var o = ctx.createOscillator();
+            var g = ctx.createGain();
+            var f = ctx.createBiquadFilter();
+            o.type = ni % 2 ? "triangle" : "sine";
+            o.frequency.value = note;
+            o.detune.value = (ni - 1.5) * 4;
+            f.type = "lowpass";
+            f.frequency.value = 800 + ni*100;
+            g.gain.setValueAtTime(0.0001, startTime);
+            g.gain.linearRampToValueAtTime(0.012 - ni*0.002, startTime + 2);
+            g.gain.exponentialRampToValueAtTime(0.0001, startTime + 6);
+            o.connect(f); f.connect(g); g.connect(master);
+            o.start(startTime);
+            o.stop(startTime + 7);
         });
-        if (match) return match;
-      }
-      return voices.find(function (voice) {
-        return voice.lang && voice.lang.toLowerCase().startsWith("en");
-      }) || voices[0];
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function speak(text) {
-    const synthWindow = rootWindow.speechSynthesis ? rootWindow : window;
-    if (!synthWindow.speechSynthesis || !synthWindow.SpeechSynthesisUtterance) return;
-    try {
-      synthWindow.speechSynthesis.cancel();
-      const utterance = new synthWindow.SpeechSynthesisUtterance(text);
-      utterance.lang = "en-US";
-      utterance.rate = 0.68;
-      utterance.pitch = 0.36;
-      utterance.volume = STATE.volumeLevel === "low" ? 0.74 : 0.88;
-      const voice = pickVoice(synthWindow);
-      if (voice) utterance.voice = voice;
-      synthWindow.speechSynthesis.speak(utterance);
-    } catch (e) {}
-  }
-
-  function assetName() {
-    return (STATE.assetName || STATE.symbol || "selected asset").replace(/\\s+/g, " ").trim();
-  }
-
-  function launchAnalysisVoice(mode) {
-    const name = assetName();
-    if (mode === "launch") {
-      speak("Launching " + name + " analysis.");
-    } else {
-      speak("Analyzing " + name + ".");
-    }
-  }
-
-  function triggerScan(mode) {
-    ensureAudio();
-    if (!STATE.enabled) return;
-    scanImpactAndRise();
-    launchAnalysisVoice(mode);
-  }
-
-  function updateToggleButton() {
-    const button = doc.getElementById(TOGGLE_ID);
-    const volume = doc.getElementById(VOLUME_ID);
-    const label = doc.getElementById(VOLUME_LABEL_ID);
-    if (button) {
-      button.textContent = STATE.enabled ? "Ambiance: ON" : "Ambiance: OFF";
-      button.setAttribute("aria-pressed", STATE.enabled ? "true" : "false");
-      button.className = STATE.enabled ? "stock-audio-control stock-audio-toggle-on" : "stock-audio-control";
-    }
-    if (volume) {
-      volume.textContent = "Volume: " + (VOLUME_LABELS[STATE.volumeLevel] || VOLUME_LABELS.medium);
-      volume.setAttribute("aria-label", "Volume ambiance sonore: " + (VOLUME_LABELS[STATE.volumeLevel] || VOLUME_LABELS.medium));
-    }
-    if (label) {
-      label.textContent = "Audio tactique local";
-    }
-  }
-
-  function toggleAmbience(event) {
-    if (event) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-    ensureAudio();
-    STATE.enabled = !STATE.enabled;
-    saveAmbientPreference();
-    if (STATE.enabled) {
-      startAmbience();
-    } else {
-      stopAmbience();
-      try {
-        (rootWindow.speechSynthesis || window.speechSynthesis).cancel();
-      } catch (e) {}
-    }
-    updateToggleButton();
-  }
-
-  function cycleVolume(event) {
-    if (event) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-    ensureAudio();
-    const currentIndex = Math.max(0, VOLUME_LEVELS.indexOf(STATE.volumeLevel));
-    STATE.volumeLevel = VOLUME_LEVELS[(currentIndex + 1) % VOLUME_LEVELS.length];
-    saveVolumePreference();
-    if (STATE.enabled) startAmbience();
-    applyVolume(0.22);
-    updateToggleButton();
-  }
-
-  function installToggle() {
-    let style = doc.getElementById(STYLE_ID);
-    if (!style) {
-      style = doc.createElement("style");
-      style.id = STYLE_ID;
-      doc.head.appendChild(style);
-    }
-    style.textContent = [
-      ".stock-audio-panel{position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;gap:8px;align-items:center;",
-      "padding:8px;border-radius:18px;border:1px solid rgba(34,211,238,.32);",
-      "background:linear-gradient(135deg,rgba(1,4,12,.96),rgba(15,23,42,.93));",
-      "box-shadow:0 0 28px rgba(34,211,238,.16),inset 0 0 22px rgba(15,23,42,.92);backdrop-filter:blur(12px)}",
-      ".stock-audio-label{color:#94a3b8;font:800 10px/1 'Courier New',monospace;letter-spacing:.10em;text-transform:uppercase;margin:0 2px;white-space:nowrap}",
-      ".stock-audio-control{min-height:42px;padding:10px 12px;border-radius:999px;border:1px solid rgba(34,211,238,.42);",
-      "background:linear-gradient(135deg,rgba(3,7,18,.96),rgba(30,41,59,.92));color:#cbd5e1;",
-      "font:900 11px/1.1 'Courier New',monospace;letter-spacing:.08em;text-transform:uppercase;",
-      "box-shadow:0 0 18px rgba(34,211,238,.12),inset 0 0 14px rgba(15,23,42,.85);",
-      "touch-action:manipulation;-webkit-tap-highlight-color:transparent;cursor:pointer}",
-      ".stock-audio-control:active{transform:translateY(1px)}",
-      ".stock-audio-toggle-on{color:#ecfeff;border-color:rgba(34,211,238,.85);",
-      "background:linear-gradient(135deg,rgba(2,6,23,.98),rgba(8,47,73,.92),rgba(88,28,135,.82));",
-      "box-shadow:0 0 34px rgba(34,211,238,.38),0 0 52px rgba(88,28,135,.20),inset 0 0 22px rgba(34,211,238,.10)}",
-      "@media (max-width:640px){.stock-audio-panel{right:10px;bottom:10px;gap:6px;padding:6px;max-width:calc(100vw - 20px);flex-wrap:wrap}.stock-audio-label{display:none}.stock-audio-control{padding:10px 11px;font-size:10px}}"
-    ].join("");
-
-    let panel = doc.getElementById(PANEL_ID);
-    if (!panel) {
-      panel = doc.createElement("div");
-      panel.id = PANEL_ID;
-      panel.className = "stock-audio-panel";
-      doc.body.appendChild(panel);
-    }
-
-    let label = doc.getElementById(VOLUME_LABEL_ID);
-    if (!label) {
-      label = doc.createElement("span");
-      label.id = VOLUME_LABEL_ID;
-      label.className = "stock-audio-label";
-      panel.appendChild(label);
-    }
-
-    let button = doc.getElementById(TOGGLE_ID);
-    if (!button) {
-      button = doc.createElement("button");
-      button.id = TOGGLE_ID;
-      button.type = "button";
-      button.setAttribute("aria-label", "Activer ou desactiver l'ambiance sonore d'analyse");
-      panel.appendChild(button);
-    } else if (button.parentNode !== panel) {
-      panel.appendChild(button);
-    }
-
-    let volume = doc.getElementById(VOLUME_ID);
-    if (!volume) {
-      volume = doc.createElement("button");
-      volume.id = VOLUME_ID;
-      volume.type = "button";
-      panel.appendChild(volume);
-    } else if (volume.parentNode !== panel) {
-      panel.appendChild(volume);
-    }
-    button.onclick = toggleAmbience;
-    volume.onclick = cycleVolume;
-    updateToggleButton();
-  }
-
-  function unlockOnFirstInteraction(event) {
-    if (event && event.target && [TOGGLE_ID, VOLUME_ID, PANEL_ID].includes(event.target.id)) return;
-    ensureAudio();
-    if (STATE.enabled) startAmbience();
-  }
-
-  function bindUnlock() {
-    if (STATE.unlockHandlers) {
-      STATE.unlockHandlers.forEach(function (entry) {
-        try {
-          entry.doc.removeEventListener(entry.type, entry.handler, true);
-        } catch (e) {}
-      });
-    }
-    STATE.unlockHandlers = [];
-    ["pointerdown", "touchstart", "keydown", "click"].forEach(function (type) {
-      doc.addEventListener(type, unlockOnFirstInteraction, { passive: true, capture: true });
-      STATE.unlockHandlers.push({ doc: doc, type: type, handler: unlockOnFirstInteraction });
     });
-  }
 
-  function bindScanButtons() {
-    const buttons = doc.querySelectorAll("button");
-    buttons.forEach(function (button) {
-      if ([TOGGLE_ID, VOLUME_ID].includes(button.id) || STATE.boundButtons.has(button)) return;
-      STATE.boundButtons.add(button);
-      button.addEventListener("click", function () {
-        const text = (button.innerText || button.textContent || button.value || button.getAttribute("aria-label") || "").toLowerCase();
-        if (text.includes("scanner") || text.includes("scan")) {
-          triggerScan("scan");
-        } else if (text.includes("lancer la recherche") || text.includes("launch")) {
-          triggerScan("launch");
+    // Rain noise
+    var bufLen = ctx.sampleRate * 4;
+    var buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+    var data = buf.getChannelData(0);
+    for (var i = 0; i < bufLen; i++) data[i] = (Math.random()*2-1)*0.3;
+    var rain = ctx.createBufferSource();
+    rain.buffer = buf;
+    rain.loop = true;
+    var rf = ctx.createBiquadFilter();
+    rf.type = "bandpass";
+    rf.frequency.value = 4000;
+    rf.Q.value = 0.5;
+    var rg = ctx.createGain();
+    rg.gain.value = 0.04;
+    rain.connect(rf); rf.connect(rg); rg.connect(master);
+    rain.start();
+
+    // Neon buzz
+    var buzz = ctx.createOscillator();
+    var bg = ctx.createGain();
+    buzz.type = "square";
+    buzz.frequency.value = 120;
+    bg.gain.value = 0.005;
+    buzz.connect(bg); bg.connect(master);
+    buzz.start();
+
+    // Market ticker clicks
+    function tick() {
+        if (!S.playing || !S.enabled) return;
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.type = "square";
+        o.frequency.value = 600 + Math.random()*600;
+        g.gain.value = 0.015;
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.04);
+        o.connect(g); g.connect(master);
+        o.start(); o.stop(ctx.currentTime + 0.04);
+        setTimeout(tick, 150 + Math.random()*700);
+    }
+    setTimeout(tick, 2000);
+
+    S.playing = true;
+    updatePanel();
+}
+
+// ---- SCAN SOUND — played when selecting an asset ----
+function playScanSound() {
+    var ctx = getCtx();
+    if (!ctx || !S.enabled) return;
+    var now = ctx.currentTime;
+    var dest = S.master || ctx.destination;
+
+    // Impact
+    var o1 = ctx.createOscillator();
+    var g1 = ctx.createGain();
+    o1.type = "sine";
+    o1.frequency.setValueAtTime(60, now);
+    o1.frequency.exponentialRampToValueAtTime(30, now + 0.4);
+    g1.gain.setValueAtTime(0.18, now);
+    g1.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    o1.connect(g1); g1.connect(ctx.destination);
+    o1.start(now); o1.stop(now + 0.5);
+
+    // Rise sweep
+    var o2 = ctx.createOscillator();
+    var g2 = ctx.createGain();
+    var f2 = ctx.createBiquadFilter();
+    o2.type = "sawtooth";
+    o2.frequency.setValueAtTime(80, now + 0.1);
+    o2.frequency.exponentialRampToValueAtTime(1200, now + 0.8);
+    f2.type = "bandpass";
+    f2.frequency.value = 800;
+    f2.Q.value = 5;
+    g2.gain.setValueAtTime(0.0001, now + 0.1);
+    g2.gain.exponentialRampToValueAtTime(0.06, now + 0.3);
+    g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+    o2.connect(f2); f2.connect(g2); g2.connect(ctx.destination);
+    o2.start(now + 0.1); o2.stop(now + 1);
+
+    // Terminal beeps
+    [0.15, 0.22, 0.29, 0.36, 0.43].forEach(function(delay, i) {
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        var freq = [523, 659, 784, 1047, 1319][i];
+        o.type = "square";
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.025, now + delay);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.06);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(now + delay); o.stop(now + delay + 0.07);
+    });
+
+    // Voice announcement
+    speak("Scanning " + S.assetName);
+}
+
+function speak(text) {
+    var synth = W.speechSynthesis || window.speechSynthesis;
+    if (!synth) return;
+    try {
+        synth.cancel();
+        var u = new (W.SpeechSynthesisUtterance || window.SpeechSynthesisUtterance)(text);
+        u.lang = "en-US";
+        u.rate = 0.65;
+        u.pitch = 0.3;
+        u.volume = S.volume === "low" ? 0.6 : 0.85;
+        var voices = synth.getVoices ? synth.getVoices() : [];
+        var preferred = ["daniel","alex","google uk english male","microsoft david"];
+        for (var p of preferred) {
+            var v = voices.find(function(x){ return x.name && x.name.toLowerCase().includes(p); });
+            if (v) { u.voice = v; break; }
         }
-      }, { passive: true });
+        synth.speak(u);
+    } catch(e) {}
+}
+
+function stopMusic() {
+    if (!S.master || !S.ctx) return;
+    var now = S.ctx.currentTime;
+    S.master.gain.cancelScheduledValues(now);
+    S.master.gain.setValueAtTime(S.master.gain.value || 0.07, now);
+    S.master.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    S.playing = false;
+    setTimeout(function() {
+        try { S.master.disconnect(); } catch(e) {}
+        S.master = null;
+    }, 600);
+}
+
+function toggleAudio() {
+    S.enabled = !S.enabled;
+    try { W.localStorage.setItem("stockAudioEnabled", S.enabled); } catch(e) {}
+    if (S.enabled) { playLaunchMusic(); }
+    else { stopMusic(); try { (W.speechSynthesis||window.speechSynthesis).cancel(); } catch(e){} }
+    updatePanel();
+}
+
+function cycleVolume() {
+    var idx = VOLS.indexOf(S.volume);
+    S.volume = VOLS[(idx+1) % VOLS.length];
+    try { W.localStorage.setItem("stockAudioVolume", S.volume); } catch(e) {}
+    if (S.master && S.ctx) {
+        var now = S.ctx.currentTime;
+        S.master.gain.cancelScheduledValues(now);
+        S.master.gain.setValueAtTime(S.master.gain.value||0.07, now);
+        S.master.gain.linearRampToValueAtTime(VOL[S.volume], now + 0.3);
+    }
+    updatePanel();
+}
+
+function updatePanel() {
+    var btn = D.getElementById("audio-toggle");
+    var vol = D.getElementById("audio-vol");
+    if (btn) {
+        btn.textContent = S.enabled ? "Ambiance: ON" : "Ambiance: OFF";
+        btn.style.borderColor = S.enabled ? "rgba(34,211,238,.85)" : "rgba(34,211,238,.3)";
+        btn.style.color = S.enabled ? "#ecfeff" : "#94a3b8";
+        btn.style.boxShadow = S.enabled ? "0 0 20px rgba(34,211,238,.3)" : "none";
+    }
+    if (vol) vol.textContent = "Volume: " + VLBL[S.volume];
+}
+
+function installPanel() {
+    var STYLE_ID = "stock-audio-style";
+    if (!D.getElementById(STYLE_ID)) {
+        var s = D.createElement("style");
+        s.id = STYLE_ID;
+        s.textContent = [
+            ".saPanel{position:fixed;right:16px;bottom:16px;z-index:2147483000;display:flex;gap:8px;align-items:center;",
+            "padding:8px 12px;border-radius:16px;border:1px solid rgba(34,211,238,.3);",
+            "background:linear-gradient(135deg,rgba(1,4,12,.96),rgba(15,23,42,.93));",
+            "box-shadow:0 0 24px rgba(34,211,238,.12);backdrop-filter:blur(12px)}",
+            ".saLabel{color:#64748b;font:800 10px/1 'Courier New',monospace;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}",
+            ".saBtn{min-height:40px;padding:8px 14px;border-radius:999px;border:1px solid rgba(34,211,238,.4);",
+            "background:linear-gradient(135deg,rgba(3,7,18,.96),rgba(30,41,59,.92));color:#cbd5e1;",
+            "font:800 11px/1.1 'Courier New',monospace;letter-spacing:.08em;text-transform:uppercase;",
+            "cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}",
+            ".saBtn:active{transform:translateY(1px)}",
+            "@media(max-width:640px){.saPanel{right:8px;bottom:8px;gap:6px;padding:6px}.saLabel{display:none}.saBtn{padding:8px 10px;font-size:10px}}"
+        ].join("");
+        D.head.appendChild(s);
+    }
+
+    var panel = D.getElementById("audio-panel");
+    if (!panel) {
+        panel = D.createElement("div");
+        panel.id = "audio-panel";
+        panel.className = "saPanel";
+        D.body.appendChild(panel);
+    }
+
+    var label = D.getElementById("audio-label");
+    if (!label) {
+        label = D.createElement("span");
+        label.id = "audio-label";
+        label.className = "saLabel";
+        label.textContent = "Audio tactique local";
+        panel.appendChild(label);
+    }
+
+    var btn = D.getElementById("audio-toggle");
+    if (!btn) {
+        btn = D.createElement("button");
+        btn.id = "audio-toggle";
+        btn.className = "saBtn";
+        btn.onclick = toggleAudio;
+        panel.appendChild(btn);
+    }
+
+    var vol = D.getElementById("audio-vol");
+    if (!vol) {
+        vol = D.createElement("button");
+        vol.id = "audio-vol";
+        vol.className = "saBtn";
+        vol.onclick = cycleVolume;
+        panel.appendChild(vol);
+    }
+
+    updatePanel();
+}
+
+// Auto-start on first interaction
+function unlock() {
+    getCtx();
+    if (S.enabled && !S.playing) playLaunchMusic();
+}
+
+["pointerdown","touchstart","keydown","click"].forEach(function(e) {
+    D.addEventListener(e, unlock, {once:true, passive:true});
+});
+
+// Bind scan buttons
+function bindButtons() {
+    D.querySelectorAll("button").forEach(function(btn) {
+        if (["audio-toggle","audio-vol"].includes(btn.id)) return;
+        if (btn._audioBound) return;
+        btn._audioBound = true;
+        btn.addEventListener("click", function() {
+            var t = (btn.innerText||btn.textContent||"").toLowerCase();
+            if (t.includes("scanner") || t.includes("lancer") || t.includes("scan")) {
+                playScanSound();
+            }
+        }, {passive:true});
     });
-  }
+}
 
-  if (rootWindow.speechSynthesis) {
-    try {
-      rootWindow.speechSynthesis.onvoiceschanged = function () {
-        pickVoice(rootWindow);
-      };
-    } catch (e) {}
-  }
+installPanel();
+bindButtons();
+setInterval(function() { installPanel(); bindButtons(); }, 1000);
 
-  installToggle();
-  bindUnlock();
-  bindScanButtons();
-  if (STATE.bindTimer && STATE.bindTimerWindow) {
-    try {
-      STATE.bindTimerWindow.clearInterval(STATE.bindTimer);
-    } catch (e) {}
-  }
-  STATE.bindTimer = window.setInterval(function () {
-    installToggle();
-    bindScanButtons();
-  }, 900);
-  STATE.bindTimerWindow = window;
-  if (STATE.started && STATE.enabled && !STATE.ambient) {
-    startAmbience();
-  }
+// Load preferences
+try {
+    var savedEnabled = W.localStorage.getItem("stockAudioEnabled");
+    if (savedEnabled !== null) S.enabled = savedEnabled === "true";
+    var savedVol = W.localStorage.getItem("stockAudioVolume");
+    if (savedVol && VOLS.includes(savedVol)) S.volume = savedVol;
+} catch(e) {}
+
+updatePanel();
+
 })();
 </script>
-"""
-        .replace("__ASSET_NAME__", json.dumps(str(asset_name or symbol or "selected asset")))
-        .replace("__SYMBOL__", json.dumps(str(symbol or "")))
-    )
+""".replace("__ASSET_NAME__", json.dumps(str(asset_name or symbol or "asset"))).replace("__SYMBOL__", json.dumps(str(symbol or "")))
     components.html(audio_html, height=1)
 
-
+# ============================================================
+# CATEGORIES & ASSETS
+# ============================================================
 CATEGORIES = [
     "Tous",
     "Actions US",
@@ -1361,8 +725,8 @@ CATEGORIES = [
     "Matières premières",
 ]
 
-
 POPULAR_ASSETS = [
+    # Actions US
     {"name": "Apple", "symbol": "AAPL", "category": "Actions US"},
     {"name": "Microsoft", "symbol": "MSFT", "category": "Actions US"},
     {"name": "Nvidia", "symbol": "NVDA", "category": "Actions US"},
@@ -1396,46 +760,128 @@ POPULAR_ASSETS = [
     {"name": "Texas Instruments", "symbol": "TXN", "category": "Actions US"},
     {"name": "Uber", "symbol": "UBER", "category": "Actions US"},
     {"name": "Shopify", "symbol": "SHOP", "category": "Actions US"},
+    {"name": "Paypal", "symbol": "PYPL", "category": "Actions US"},
+    {"name": "Block (Square)", "symbol": "SQ", "category": "Actions US"},
+    {"name": "Spotify", "symbol": "SPOT", "category": "Actions US"},
+    {"name": "Airbnb", "symbol": "ABNB", "category": "Actions US"},
+    {"name": "Snowflake", "symbol": "SNOW", "category": "Actions US"},
+    {"name": "CrowdStrike", "symbol": "CRWD", "category": "Actions US"},
+    {"name": "Palo Alto Networks", "symbol": "PANW", "category": "Actions US"},
+    {"name": "ServiceNow", "symbol": "NOW", "category": "Actions US"},
+    {"name": "Datadog", "symbol": "DDOG", "category": "Actions US"},
+    {"name": "Cloudflare", "symbol": "NET", "category": "Actions US"},
+    {"name": "MongoDB", "symbol": "MDB", "category": "Actions US"},
+    {"name": "Zoom", "symbol": "ZM", "category": "Actions US"},
+    {"name": "Boeing", "symbol": "BA", "category": "Actions US"},
+    {"name": "Lockheed Martin", "symbol": "LMT", "category": "Actions US"},
+    {"name": "ExxonMobil", "symbol": "XOM", "category": "Actions US"},
+    {"name": "Chevron", "symbol": "CVX", "category": "Actions US"},
+    {"name": "Pfizer", "symbol": "PFE", "category": "Actions US"},
+    {"name": "Moderna", "symbol": "MRNA", "category": "Actions US"},
+    {"name": "Johnson & Johnson", "symbol": "JNJ", "category": "Actions US"},
+    {"name": "Goldman Sachs", "symbol": "GS", "category": "Actions US"},
+    {"name": "Morgan Stanley", "symbol": "MS", "category": "Actions US"},
+    {"name": "Micron", "symbol": "MU", "category": "Actions US"},
+    {"name": "Applied Materials", "symbol": "AMAT", "category": "Actions US"},
+    {"name": "TSMC", "symbol": "TSM", "category": "Actions US"},
     {"name": "Sea Limited", "symbol": "SE", "category": "Actions US"},
     {"name": "MercadoLibre", "symbol": "MELI", "category": "Actions US"},
+    {"name": "Disney", "symbol": "DIS", "category": "Actions US"},
+    # Actions Europe
     {"name": "LVMH", "symbol": "MC.PA", "category": "Actions Europe"},
     {"name": "TotalEnergies", "symbol": "TTE.PA", "category": "Actions Europe"},
     {"name": "Airbus", "symbol": "AIR.PA", "category": "Actions Europe"},
     {"name": "BNP Paribas", "symbol": "BNP.PA", "category": "Actions Europe"},
     {"name": "Schneider Electric", "symbol": "SU.PA", "category": "Actions Europe"},
-    {"name": "Hermes", "symbol": "RMS.PA", "category": "Actions Europe"},
+    {"name": "Hermès", "symbol": "RMS.PA", "category": "Actions Europe"},
     {"name": "Safran", "symbol": "SAF.PA", "category": "Actions Europe"},
     {"name": "Sanofi", "symbol": "SAN.PA", "category": "Actions Europe"},
     {"name": "AXA", "symbol": "CS.PA", "category": "Actions Europe"},
-    {"name": "Dassault Systemes", "symbol": "DSY.PA", "category": "Actions Europe"},
-    {"name": "L'Oreal", "symbol": "OR.PA", "category": "Actions Europe"},
+    {"name": "Dassault Systèmes", "symbol": "DSY.PA", "category": "Actions Europe"},
+    {"name": "L'Oréal", "symbol": "OR.PA", "category": "Actions Europe"},
     {"name": "Kering", "symbol": "KER.PA", "category": "Actions Europe"},
     {"name": "Renault", "symbol": "RNO.PA", "category": "Actions Europe"},
-    {"name": "Stellantis", "symbol": "STLAP.PA", "category": "Actions Europe"},
-    {"name": "Societe Generale", "symbol": "GLE.PA", "category": "Actions Europe"},
-    {"name": "Credit Agricole", "symbol": "ACA.PA", "category": "Actions Europe"},
-    {"name": "Bitcoin", "symbol": "BTC-USD", "category": "Crypto"},
-    {"name": "Ethereum", "symbol": "ETH-USD", "category": "Crypto"},
-    {"name": "Solana", "symbol": "SOL-USD", "category": "Crypto"},
+    {"name": "Société Générale", "symbol": "GLE.PA", "category": "Actions Europe"},
+    {"name": "Crédit Agricole", "symbol": "ACA.PA", "category": "Actions Europe"},
+    {"name": "Danone", "symbol": "BN.PA", "category": "Actions Europe"},
+    {"name": "Michelin", "symbol": "ML.PA", "category": "Actions Europe"},
+    {"name": "Capgemini", "symbol": "CAP.PA", "category": "Actions Europe"},
+    {"name": "ASML", "symbol": "ASML", "category": "Actions Europe"},
+    {"name": "SAP", "symbol": "SAP", "category": "Actions Europe"},
+    {"name": "Siemens", "symbol": "SIEGY", "category": "Actions Europe"},
+    {"name": "Volkswagen", "symbol": "VWAGY", "category": "Actions Europe"},
+    {"name": "BMW", "symbol": "BMWYY", "category": "Actions Europe"},
+    {"name": "Nestlé", "symbol": "NSRGY", "category": "Actions Europe"},
+    {"name": "Novartis", "symbol": "NVS", "category": "Actions Europe"},
+    {"name": "Roche", "symbol": "RHHBY", "category": "Actions Europe"},
+    {"name": "HSBC", "symbol": "HSBC", "category": "Actions Europe"},
+    {"name": "BP", "symbol": "BP", "category": "Actions Europe"},
+    {"name": "Shell", "symbol": "SHEL", "category": "Actions Europe"},
+    {"name": "Unilever", "symbol": "UL", "category": "Actions Europe"},
+    # Crypto
+    {"name": "Bitcoin (BTC)", "symbol": "BTC-USD", "category": "Crypto"},
+    {"name": "Ethereum (ETH)", "symbol": "ETH-USD", "category": "Crypto"},
     {"name": "BNB", "symbol": "BNB-USD", "category": "Crypto"},
+    {"name": "Solana (SOL)", "symbol": "SOL-USD", "category": "Crypto"},
     {"name": "XRP", "symbol": "XRP-USD", "category": "Crypto"},
-    {"name": "Dogecoin", "symbol": "DOGE-USD", "category": "Crypto"},
-    {"name": "Cardano", "symbol": "ADA-USD", "category": "Crypto"},
-    {"name": "Avalanche", "symbol": "AVAX-USD", "category": "Crypto"},
-    {"name": "Chainlink", "symbol": "LINK-USD", "category": "Crypto"},
-    {"name": "Polkadot", "symbol": "DOT-USD", "category": "Crypto"},
-    {"name": "Polygon", "symbol": "MATIC-USD", "category": "Crypto"},
-    {"name": "Litecoin", "symbol": "LTC-USD", "category": "Crypto"},
-    {"name": "SPDR S&P 500 ETF", "symbol": "SPY", "category": "ETF"},
-    {"name": "Invesco QQQ ETF", "symbol": "QQQ", "category": "ETF"},
-    {"name": "Vanguard S&P 500 ETF", "symbol": "VOO", "category": "ETF"},
-    {"name": "iShares MSCI World ETF", "symbol": "URTH", "category": "ETF"},
-    {"name": "ARK Innovation ETF", "symbol": "ARKK", "category": "ETF"},
-    {"name": "iShares Russell 2000 ETF", "symbol": "IWM", "category": "ETF"},
-    {"name": "Financial Select Sector ETF", "symbol": "XLF", "category": "ETF"},
-    {"name": "Technology Select Sector ETF", "symbol": "XLK", "category": "ETF"},
-    {"name": "Energy Select Sector ETF", "symbol": "XLE", "category": "ETF"},
-    {"name": "Gold ETF", "symbol": "GLD", "category": "ETF"},
+    {"name": "Dogecoin (DOGE)", "symbol": "DOGE-USD", "category": "Crypto"},
+    {"name": "Cardano (ADA)", "symbol": "ADA-USD", "category": "Crypto"},
+    {"name": "Avalanche (AVAX)", "symbol": "AVAX-USD", "category": "Crypto"},
+    {"name": "Chainlink (LINK)", "symbol": "LINK-USD", "category": "Crypto"},
+    {"name": "Polkadot (DOT)", "symbol": "DOT-USD", "category": "Crypto"},
+    {"name": "Polygon (MATIC)", "symbol": "MATIC-USD", "category": "Crypto"},
+    {"name": "Litecoin (LTC)", "symbol": "LTC-USD", "category": "Crypto"},
+    {"name": "Shiba Inu (SHIB)", "symbol": "SHIB-USD", "category": "Crypto"},
+    {"name": "TRON (TRX)", "symbol": "TRX-USD", "category": "Crypto"},
+    {"name": "Stellar (XLM)", "symbol": "XLM-USD", "category": "Crypto"},
+    {"name": "Monero (XMR)", "symbol": "XMR-USD", "category": "Crypto"},
+    {"name": "Cosmos (ATOM)", "symbol": "ATOM-USD", "category": "Crypto"},
+    {"name": "Uniswap (UNI)", "symbol": "UNI-USD", "category": "Crypto"},
+    {"name": "Ethereum Classic (ETC)", "symbol": "ETC-USD", "category": "Crypto"},
+    {"name": "Filecoin (FIL)", "symbol": "FIL-USD", "category": "Crypto"},
+    {"name": "Aave (AAVE)", "symbol": "AAVE-USD", "category": "Crypto"},
+    {"name": "Maker (MKR)", "symbol": "MKR-USD", "category": "Crypto"},
+    {"name": "Compound (COMP)", "symbol": "COMP-USD", "category": "Crypto"},
+    {"name": "Curve (CRV)", "symbol": "CRV-USD", "category": "Crypto"},
+    {"name": "Quant (QNT)", "symbol": "QNT-USD", "category": "Crypto"},
+    {"name": "Render (RNDR)", "symbol": "RNDR-USD", "category": "Crypto"},
+    {"name": "Injective (INJ)", "symbol": "INJ-USD", "category": "Crypto"},
+    {"name": "Arbitrum (ARB)", "symbol": "ARB-USD", "category": "Crypto"},
+    {"name": "Optimism (OP)", "symbol": "OP-USD", "category": "Crypto"},
+    {"name": "Aptos (APT)", "symbol": "APT-USD", "category": "Crypto"},
+    {"name": "Sui (SUI)", "symbol": "SUI-USD", "category": "Crypto"},
+    {"name": "Pepe (PEPE)", "symbol": "PEPE-USD", "category": "Crypto"},
+    {"name": "Bitcoin Cash (BCH)", "symbol": "BCH-USD", "category": "Crypto"},
+    {"name": "Dash (DASH)", "symbol": "DASH-USD", "category": "Crypto"},
+    {"name": "Zcash (ZEC)", "symbol": "ZEC-USD", "category": "Crypto"},
+    {"name": "Algorand (ALGO)", "symbol": "ALGO-USD", "category": "Crypto"},
+    {"name": "VeChain (VET)", "symbol": "VET-USD", "category": "Crypto"},
+    {"name": "Internet Computer (ICP)", "symbol": "ICP-USD", "category": "Crypto"},
+    {"name": "Hedera (HBAR)", "symbol": "HBAR-USD", "category": "Crypto"},
+    {"name": "Near Protocol (NEAR)", "symbol": "NEAR-USD", "category": "Crypto"},
+    {"name": "Fantom (FTM)", "symbol": "FTM-USD", "category": "Crypto"},
+    {"name": "Decentraland (MANA)", "symbol": "MANA-USD", "category": "Crypto"},
+    {"name": "Sandbox (SAND)", "symbol": "SAND-USD", "category": "Crypto"},
+    {"name": "Axie Infinity (AXS)", "symbol": "AXS-USD", "category": "Crypto"},
+    {"name": "1inch (1INCH)", "symbol": "1INCH-USD", "category": "Crypto"},
+    {"name": "SushiSwap (SUSHI)", "symbol": "SUSHI-USD", "category": "Crypto"},
+    {"name": "Yearn Finance (YFI)", "symbol": "YFI-USD", "category": "Crypto"},
+    {"name": "Floki (FLOKI)", "symbol": "FLOKI-USD", "category": "Crypto"},
+    {"name": "Bonk (BONK)", "symbol": "BONK-USD", "category": "Crypto"},
+    # ETF
+    {"name": "SPDR S&P 500 (SPY)", "symbol": "SPY", "category": "ETF"},
+    {"name": "Invesco QQQ (QQQ)", "symbol": "QQQ", "category": "ETF"},
+    {"name": "Vanguard S&P 500 (VOO)", "symbol": "VOO", "category": "ETF"},
+    {"name": "iShares MSCI World (URTH)", "symbol": "URTH", "category": "ETF"},
+    {"name": "ARK Innovation (ARKK)", "symbol": "ARKK", "category": "ETF"},
+    {"name": "iShares Russell 2000 (IWM)", "symbol": "IWM", "category": "ETF"},
+    {"name": "Financial Select (XLF)", "symbol": "XLF", "category": "ETF"},
+    {"name": "Technology Select (XLK)", "symbol": "XLK", "category": "ETF"},
+    {"name": "Energy Select (XLE)", "symbol": "XLE", "category": "ETF"},
+    {"name": "Gold ETF (GLD)", "symbol": "GLD", "category": "ETF"},
+    {"name": "Vanguard Total Market (VTI)", "symbol": "VTI", "category": "ETF"},
+    {"name": "iShares Emerging (IEMG)", "symbol": "IEMG", "category": "ETF"},
+    # Forex
     {"name": "EUR/USD", "symbol": "EURUSD=X", "category": "Forex"},
     {"name": "GBP/USD", "symbol": "GBPUSD=X", "category": "Forex"},
     {"name": "USD/JPY", "symbol": "JPY=X", "category": "Forex"},
@@ -1444,6 +890,9 @@ POPULAR_ASSETS = [
     {"name": "USD/CAD", "symbol": "CAD=X", "category": "Forex"},
     {"name": "NZD/USD", "symbol": "NZDUSD=X", "category": "Forex"},
     {"name": "EUR/GBP", "symbol": "EURGBP=X", "category": "Forex"},
+    {"name": "EUR/JPY", "symbol": "EURJPY=X", "category": "Forex"},
+    {"name": "USD/CNY", "symbol": "CNY=X", "category": "Forex"},
+    # Indices
     {"name": "S&P 500", "symbol": "^GSPC", "category": "Indices"},
     {"name": "Nasdaq 100", "symbol": "^NDX", "category": "Indices"},
     {"name": "Dow Jones", "symbol": "^DJI", "category": "Indices"},
@@ -1454,30 +903,189 @@ POPULAR_ASSETS = [
     {"name": "Euro Stoxx 50", "symbol": "^STOXX50E", "category": "Indices"},
     {"name": "Nikkei 225", "symbol": "^N225", "category": "Indices"},
     {"name": "Hang Seng", "symbol": "^HSI", "category": "Indices"},
-    {"name": "Gold Futures", "symbol": "GC=F", "category": "Matières premières"},
-    {"name": "Silver Futures", "symbol": "SI=F", "category": "Matières premières"},
-    {"name": "Copper Futures", "symbol": "HG=F", "category": "Matières premières"},
+    {"name": "ASX 200", "symbol": "^AXJO", "category": "Indices"},
+    {"name": "Sensex (Inde)", "symbol": "^BSESN", "category": "Indices"},
+    # Matières premières
+    {"name": "Gold (Or)", "symbol": "GC=F", "category": "Matières premières"},
+    {"name": "Silver (Argent)", "symbol": "SI=F", "category": "Matières premières"},
+    {"name": "Copper (Cuivre)", "symbol": "HG=F", "category": "Matières premières"},
     {"name": "Oil WTI", "symbol": "CL=F", "category": "Matières premières"},
     {"name": "Brent Oil", "symbol": "BZ=F", "category": "Matières premières"},
     {"name": "Natural Gas", "symbol": "NG=F", "category": "Matières premières"},
-    {"name": "Corn Futures", "symbol": "ZC=F", "category": "Matières premières"},
-    {"name": "Soybean Futures", "symbol": "ZS=F", "category": "Matières premières"},
+    {"name": "Corn (Maïs)", "symbol": "ZC=F", "category": "Matières premières"},
+    {"name": "Wheat (Blé)", "symbol": "ZW=F", "category": "Matières premières"},
+    {"name": "Soybean (Soja)", "symbol": "ZS=F", "category": "Matières premières"},
+    {"name": "Platinum", "symbol": "PL=F", "category": "Matières premières"},
 ]
 
+ASSET_METADATA = {a["symbol"]: a for a in POPULAR_ASSETS}
+BASE_ASSETS = {a["name"]: a["symbol"] for a in POPULAR_ASSETS}
 
-BASE_ASSETS = {asset["name"]: asset["symbol"] for asset in POPULAR_ASSETS}
-ASSET_METADATA = {asset["symbol"]: asset for asset in POPULAR_ASSETS}
+# ============================================================
+# COINGECKO — All cryptos
+# ============================================================
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_all_cryptos():
+    """Fetch all cryptos from CoinGecko — 10000+"""
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/list"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            cryptos = []
+            for coin in data:
+                sym = str(coin.get("symbol","")).upper() + "-USD"
+                name = str(coin.get("name",""))
+                if name and len(name) > 0:
+                    cryptos.append({
+                        "name": f"{name} ({coin.get('symbol','').upper()})",
+                        "symbol": sym,
+                        "category": "Crypto",
+                        "source": "CoinGecko",
+                        "priority": 500
+                    })
+            return cryptos[:10000]
+    except Exception:
+        pass
+    return []
 
+# ============================================================
+# FINNHUB — All world stocks
+# ============================================================
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_finnhub_stocks():
+    """Fetch all stocks from Finnhub — world exchanges"""
+    if not FINNHUB_KEY:
+        return []
 
+    exchanges = ["US", "L", "PA", "DE", "T", "HK", "TO", "AS"]
+    all_stocks = []
+
+    for exchange in exchanges:
+        try:
+            url = f"https://finnhub.io/api/v1/stock/symbol?exchange={exchange}&token={FINNHUB_KEY}"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                for stock in data[:500]:
+                    sym = str(stock.get("symbol","")).strip()
+                    name = str(stock.get("description","")).strip()
+                    if sym and name:
+                        cat = "Actions US" if exchange == "US" else "Actions Europe" if exchange in ["L","PA","DE","AS"] else "Actions Asie"
+                        all_stocks.append({
+                            "name": f"{name}",
+                            "symbol": sym,
+                            "category": cat,
+                            "source": f"Finnhub-{exchange}",
+                            "priority": 200
+                        })
+        except Exception:
+            continue
+
+    return all_stocks
+
+# ============================================================
+# CATALOG
+# ============================================================
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_catalog():
+    rows = []
+
+    # Popular assets first
+    for i, asset in enumerate(POPULAR_ASSETS):
+        rows.append({
+            "name": asset["name"],
+            "symbol": asset["symbol"],
+            "category": asset["category"],
+            "type": asset["category"],
+            "source": "Populaire",
+            "priority": i
+        })
+
+    # Finnhub world stocks
+    finnhub_stocks = get_finnhub_stocks()
+    for stock in finnhub_stocks:
+        rows.append({
+            "name": stock["name"],
+            "symbol": stock["symbol"],
+            "category": stock["category"],
+            "type": stock["category"],
+            "source": stock["source"],
+            "priority": stock["priority"]
+        })
+
+    # CoinGecko all cryptos
+    all_cryptos = get_all_cryptos()
+    for crypto in all_cryptos:
+        rows.append({
+            "name": crypto["name"],
+            "symbol": crypto["symbol"],
+            "category": "Crypto",
+            "type": "Crypto",
+            "source": "CoinGecko",
+            "priority": 500
+        })
+
+    # NASDAQ listed
+    try:
+        r = requests.get(
+            "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+            timeout=8
+        )
+        df = pd.read_csv(io.StringIO(r.text), sep="|")
+        if "Test Issue" in df.columns:
+            df = df[df["Test Issue"] == "N"]
+        for _, row in df.head(3000).iterrows():
+            sym = str(row.get("Symbol","")).strip()
+            name = str(row.get("Security Name","")).strip()
+            if sym and name and sym.lower() != "nan":
+                rows.append({
+                    "name": name, "symbol": sym,
+                    "category": "Actions US", "type": "Actions US",
+                    "source": "NASDAQ", "priority": 1000
+                })
+    except Exception:
+        pass
+
+    # NYSE/AMEX
+    try:
+        r = requests.get(
+            "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+            timeout=8
+        )
+        df = pd.read_csv(io.StringIO(r.text), sep="|")
+        if "Test Issue" in df.columns:
+            df = df[df["Test Issue"] == "N"]
+        for _, row in df.head(3000).iterrows():
+            sym = str(row.get("ACT Symbol","")).replace(".","-").strip()
+            name = str(row.get("Security Name","")).strip()
+            if sym and name and sym.lower() != "nan":
+                rows.append({
+                    "name": name, "symbol": sym,
+                    "category": "Actions US", "type": "Actions US",
+                    "source": "NYSE", "priority": 1000
+                })
+    except Exception:
+        pass
+
+    catalog_df = pd.DataFrame(rows).dropna()
+    catalog_df = catalog_df[catalog_df["symbol"].astype(str).str.len() > 0]
+    catalog_df = catalog_df.drop_duplicates("symbol")
+    catalog_df = catalog_df.sort_values(
+        ["priority","category","name"], kind="stable"
+    ).reset_index(drop=True)
+    return catalog_df
+
+# ============================================================
+# HELPERS
+# ============================================================
 def safe_number(value, decimals=2, suffix=""):
     try:
         if value is None or pd.isna(value):
             return "N/D"
-        number = float(value)
-        return f"{number:.{decimals}f}{suffix}"
+        return f"{float(value):.{decimals}f}{suffix}"
     except Exception:
         return "N/D"
-
 
 def format_int(value):
     try:
@@ -1487,176 +1095,105 @@ def format_int(value):
     except Exception:
         return "N/D"
 
+def money(x):
+    try:
+        if x is None or pd.isna(x):
+            return "N/D"
+        x = float(x)
+        if abs(x) >= 1e12: return f"${x/1e12:.2f}T"
+        if abs(x) >= 1e9: return f"${x/1e9:.2f}B"
+        if abs(x) >= 1e6: return f"${x/1e6:.2f}M"
+        return f"${x:,.2f}"
+    except Exception:
+        return "N/D"
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_catalog():
-    rows = []
-    for priority, asset in enumerate(POPULAR_ASSETS):
-        rows.append(
-            {
-                "name": asset["name"],
-                "symbol": asset["symbol"],
-                "category": asset["category"],
-                "type": asset["category"],
-                "source": "Populaire",
-                "priority": priority,
-            }
-        )
+def fallback_currency(symbol):
+    if symbol.endswith(".PA") or symbol in {"^FCHI","^GDAXI","^STOXX50E"}:
+        return "EUR"
+    return "USD"
 
-    sources = [
-        (
-            "NASDAQ",
-            "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
-            "Symbol",
-            "Security Name",
-        ),
-        (
-            "NYSE/AMEX",
-            "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
-            "ACT Symbol",
-            "Security Name",
-        ),
-    ]
-
-    for market_type, url, symbol_col, name_col in sources:
-        try:
-            response = requests.get(url, timeout=8)
-            response.raise_for_status()
-            df = pd.read_csv(io.StringIO(response.text), sep="|")
-            if "Test Issue" in df.columns:
-                df = df[df["Test Issue"] == "N"]
-            for offset, (_, row) in enumerate(df.head(1500).iterrows()):
-                symbol_value = str(row.get(symbol_col, "")).replace(".", "-").strip()
-                asset_name = str(row.get(name_col, "")).strip()
-                if symbol_value and symbol_value.lower() != "nan" and asset_name:
-                    rows.append(
-                        {
-                            "name": asset_name,
-                            "symbol": symbol_value,
-                            "category": "Actions US",
-                            "type": "Actions US",
-                            "source": market_type,
-                            "priority": 1000 + offset,
-                        }
-                    )
-        except Exception:
-            continue
-
-    catalog_df = pd.DataFrame(rows).dropna()
-    catalog_df = catalog_df[catalog_df["symbol"].astype(str).str.len() > 0]
-    catalog_df = catalog_df.drop_duplicates("symbol")
-    catalog_df = catalog_df.sort_values(["priority", "category", "name"], kind="stable").reset_index(drop=True)
-    return catalog_df
-
+def price_line(value, currency):
+    try:
+        return f"{float(value):,.2f} {currency}".replace(",", " ")
+    except Exception:
+        return "N/D"
 
 def asset_label(row):
     return f"{row['symbol']} — {row['name']} [{row['category']}]"
 
-
 def popular_slice(catalog_df, category="Tous", limit=60):
-    popular = catalog_df[catalog_df["priority"] < 1000]
+    pop = catalog_df[catalog_df["priority"] < 200]
     if category != "Tous":
-        popular = popular[popular["category"] == category]
-    if popular.empty:
-        popular = catalog_df if category == "Tous" else catalog_df[catalog_df["category"] == category]
-    return popular.sort_values(["priority", "name"], kind="stable").head(limit)
-
+        pop = pop[pop["category"] == category]
+    if pop.empty:
+        pop = catalog_df if category == "Tous" else catalog_df[catalog_df["category"] == category]
+    return pop.sort_values(["priority","name"], kind="stable").head(limit)
 
 def filter_catalog(catalog_df, category="Tous", query="", limit=80):
     scoped = catalog_df if category == "Tous" else catalog_df[catalog_df["category"] == category]
     if scoped.empty:
         return popular_slice(catalog_df, "Tous", limit), True
-
     q = str(query or "").lower().strip()
     if not q:
-        return scoped.sort_values(["priority", "name"], kind="stable").head(limit), False
-
+        return scoped.sort_values(["priority","name"], kind="stable").head(limit), False
     filtered = scoped[
-        scoped["name"].str.lower().str.contains(q, na=False, regex=False)
-        | scoped["symbol"].str.lower().str.contains(q, na=False, regex=False)
-        | scoped["category"].str.lower().str.contains(q, na=False, regex=False)
+        scoped["name"].str.lower().str.contains(q, na=False, regex=False) |
+        scoped["symbol"].str.lower().str.contains(q, na=False, regex=False)
     ]
     if filtered.empty:
         return popular_slice(catalog_df, category, limit), True
-    return filtered.sort_values(["priority", "name"], kind="stable").head(limit), False
-
+    return filtered.sort_values(["priority","name"], kind="stable").head(limit), False
 
 def reset_asset_search():
     st.session_state.asset_category = "Tous"
     st.session_state.asset_search_text = ""
     st.session_state.selected_asset_symbol = "AAPL"
 
+def tv_symbol(symbol):
+    if symbol.endswith("-USD"):
+        return "CRYPTO:" + symbol.replace("-USD","USD")
+    if symbol.endswith(".PA"):
+        return "EURONEXT:" + symbol.replace(".PA","")
+    if symbol.startswith("^"):
+        return symbol
+    return "NASDAQ:" + symbol
 
-def fallback_currency(symbol):
-    if symbol.endswith(".PA") or symbol in {"^FCHI", "^GDAXI", "^STOXX50E", "EURUSD=X", "EURGBP=X"}:
-        return "EUR"
-    if symbol.endswith("=X"):
-        return "USD"
-    return "USD"
-
-
+# ============================================================
+# DATA FETCHING — with robust error handling
+# ============================================================
 def build_fallback_history(symbol):
     end = pd.Timestamp.utcnow().normalize()
     index = pd.bdate_range(end=end, periods=126)
     if index.empty:
         return pd.DataFrame()
-
-    seed = sum((idx + 1) * ord(char) for idx, char in enumerate(symbol))
-    base_price = {
-        "AAPL": 190,
-        "MSFT": 420,
-        "NVDA": 950,
-        "BTC-USD": 65000,
-        "ETH-USD": 3400,
-        "SPY": 520,
-        "EURUSD=X": 1.08,
-        "GC=F": 2350,
-    }.get(symbol, 40 + (seed % 420))
-
+    seed = sum((i+1)*ord(c) for i,c in enumerate(symbol))
+    base = {"AAPL":190,"MSFT":420,"NVDA":950,"BTC-USD":65000,"ETH-USD":3400,"SPY":520}.get(symbol, 40+(seed%420))
     rows = []
-    for idx, date_value in enumerate(index):
-        wave = ((idx % 19) - 9) / 900
-        drift = (idx - len(index) / 2) / 4200
-        close_value = max(base_price * (1 + wave + drift + ((seed % 11) - 5) / 3000), 0.01)
-        open_value = close_value * (1 - ((idx % 5) - 2) / 1200)
-        high_value = max(open_value, close_value) * 1.006
-        low_value = min(open_value, close_value) * 0.994
-        rows.append(
-            {
-                "Open": open_value,
-                "High": high_value,
-                "Low": low_value,
-                "Close": close_value,
-                "Volume": int(750000 + (seed % 900000) + idx * 1200),
-            }
-        )
-
+    for i, d in enumerate(index):
+        wave = ((i%19)-9)/900
+        drift = (i-len(index)/2)/4200
+        close = max(base*(1+wave+drift+((seed%11)-5)/3000), 0.01)
+        open_ = close*(1-((i%5)-2)/1200)
+        rows.append({
+            "Open": open_, "High": max(open_,close)*1.006,
+            "Low": min(open_,close)*0.994, "Close": close,
+            "Volume": int(750000+(seed%900000)+i*1200)
+        })
     data = pd.DataFrame(rows, index=index)
     data.attrs["is_fallback"] = True
     return data
 
-
-@st.cache_data(ttl=7200, show_spinner=False)
-def get_history(symbol):
+@st.cache_data(ttl=300, show_spinner=False)
+def get_history(symbol, period="6mo"):
     try:
-        data = yf.download(
-            symbol,
-            period="6mo",
-            progress=False,
-            threads=False,
-            auto_adjust=False,
-        )
+        data = yf.download(symbol, period=period, progress=False, threads=False, auto_adjust=False)
         if data is None or data.empty:
             return build_fallback_history(symbol)
-
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-
-        expected = ["Open", "High", "Low", "Close", "Volume"]
-        for column in expected:
-            if column in data.columns:
-                data[column] = pd.to_numeric(data[column], errors="coerce")
-
+        for col in ["Open","High","Low","Close","Volume"]:
+            if col in data.columns:
+                data[col] = pd.to_numeric(data[col], errors="coerce")
         data = data.dropna(subset=["Close"])
         if data.empty:
             return build_fallback_history(symbol)
@@ -1665,86 +1202,96 @@ def get_history(symbol):
     except Exception:
         return build_fallback_history(symbol)
 
-
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_info(symbol):
     try:
         info = yf.Ticker(symbol).info
-        if isinstance(info, dict):
+        if isinstance(info, dict) and len(info) > 3:
             return info
         return {}
     except Exception:
         asset = ASSET_METADATA.get(symbol, {})
         return {
             "shortName": asset.get("name", symbol),
-            "quoteType": asset.get("category", "N/D"),
-            "currency": fallback_currency(symbol),
+            "quoteType": asset.get("category","N/D"),
+            "currency": fallback_currency(symbol)
         }
 
-
-def money(x):
+@st.cache_data(ttl=30, show_spinner=False)
+def get_live_price_finnhub(symbol):
+    """Get live price from Finnhub"""
+    if not FINNHUB_KEY:
+        return None
     try:
-        if x is None or pd.isna(x):
-            return "N/D"
-        x = float(x)
-        if abs(x) >= 1_000_000_000_000:
-            return f"${x/1_000_000_000_000:.2f}T"
-        if abs(x) >= 1_000_000_000:
-            return f"${x/1_000_000_000:.2f}B"
-        if abs(x) >= 1_000_000:
-            return f"${x/1_000_000:.2f}M"
-        return f"${x:,.2f}"
+        url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_KEY}"
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("c") and data["c"] > 0:
+                return {
+                    "price": data["c"],
+                    "change": data.get("d", 0),
+                    "change_pct": data.get("dp", 0),
+                    "high": data.get("h", 0),
+                    "low": data.get("l", 0),
+                    "open": data.get("o", 0),
+                    "prev_close": data.get("pc", 0)
+                }
     except Exception:
-        return "N/D"
+        pass
+    return None
 
+@st.cache_data(ttl=60, show_spinner=False)
+def get_live_crypto_coingecko(symbol):
+    """Get live crypto price from CoinGecko"""
+    try:
+        coin_id = symbol.replace("-USD","").lower()
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true"
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if coin_id in data:
+                d = data[coin_id]
+                return {
+                    "price": d.get("usd", 0),
+                    "change_pct": d.get("usd_24h_change", 0),
+                    "volume": d.get("usd_24h_vol", 0),
+                    "market_cap": d.get("usd_market_cap", 0)
+                }
+    except Exception:
+        pass
+    return None
 
-def tv_symbol(symbol):
-    if symbol.endswith("-USD"):
-        return "CRYPTO:" + symbol.replace("-USD", "USD")
-    if symbol.endswith(".PA"):
-        return "EURONEXT:" + symbol.replace(".PA", "")
-    if symbol.startswith("^"):
-        return symbol
-    if symbol.endswith("=F") or symbol.endswith("=X"):
-        return symbol
-    return "NASDAQ:" + symbol
-
-
-def unavailable_box(message="Données temporairement indisponibles"):
-    st.markdown(
-        f'<div class="data-missing">▣ {message}. Yahoo Finance peut limiter les requêtes. '
-        "Réessaie dans quelques minutes ou sélectionne un autre actif.</div>",
-        unsafe_allow_html=True,
-    )
-
+def get_close_series(history):
+    if history is None or history.empty or "Close" not in history.columns:
+        return pd.Series(dtype="float64")
+    close = history["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:,0]
+    return pd.to_numeric(close, errors="coerce").dropna()
 
 def kpi_card(title, value, tone=""):
     tone_class = f" {tone}" if tone else ""
     st.markdown(
         f'<div class="kpi"><div class="kpi-title">{title}</div>'
         f'<div class="kpi-value{tone_class}">{value}</div></div>',
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
 
+def unavailable_box(msg="Données temporairement indisponibles"):
+    st.markdown(
+        f'<div class="data-missing">▣ {msg}. Réessaie dans quelques minutes.</div>',
+        unsafe_allow_html=True
+    )
 
-def get_close_series(history):
-    if history is None or history.empty or "Close" not in history.columns:
-        return pd.Series(dtype="float64")
-    close_data = history["Close"]
-    if isinstance(close_data, pd.DataFrame):
-        close_data = close_data.iloc[:, 0]
-    return pd.to_numeric(close_data, errors="coerce").dropna()
-
-
-def price_line(value, currency):
-    try:
-        return f"{float(value):,.2f} {currency}".replace(",", " ")
-    except Exception:
-        return "N/D"
-
-
+# ============================================================
+# LOAD CATALOG
+# ============================================================
 catalog = load_catalog()
 
+# ============================================================
+# SESSION STATE
+# ============================================================
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = []
 if "asset_category" not in st.session_state:
@@ -1754,9 +1301,12 @@ if "asset_search_text" not in st.session_state:
 if "selected_asset_symbol" not in st.session_state:
     st.session_state.selected_asset_symbol = "AAPL"
 
+# ============================================================
+# SIDEBAR
+# ============================================================
 with st.sidebar:
-    st.markdown('<div class="neon-title">Stock Insight</div>', unsafe_allow_html=True)
-    st.markdown('<div class="neon-subtitle">Neon Terminal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="neon-title">Analyse<br>Boursière</div>', unsafe_allow_html=True)
+    st.markdown('<div class="neon-subtitle">Terminal Néon</div>', unsafe_allow_html=True)
     st.caption("Radar financier cyberpunk sans API payante")
     st.markdown("---")
 
@@ -1764,134 +1314,177 @@ with st.sidebar:
         "Catégorie d'actifs",
         CATEGORIES,
         key="asset_category",
-        help="Filtre la palette avant de choisir un actif.",
     )
+
     query = st.text_input(
         "🔎 Filtrer la palette",
         key="asset_search_text",
         placeholder="Nom, symbole, crypto, ETF, forex...",
-        help="Laisse vide pour afficher une liste prête à sélectionner.",
     )
 
-    filtered, used_popular_fallback = filter_catalog(catalog, st.session_state.asset_category, query)
+    filtered, used_fallback = filter_catalog(
+        catalog, st.session_state.asset_category, query
+    )
     if filtered.empty:
         filtered = popular_slice(catalog, "Tous", 60)
-        used_popular_fallback = True
+        used_fallback = True
 
     labels = filtered.apply(asset_label, axis=1).tolist()
     symbol_by_label = dict(zip(labels, filtered["symbol"].tolist()))
     name_by_symbol = dict(zip(filtered["symbol"].tolist(), filtered["name"].tolist()))
-    previous_symbol = st.session_state.get("selected_asset_symbol", "AAPL")
-    default_index = 0
-    if previous_symbol in filtered["symbol"].tolist():
-        default_index = filtered["symbol"].tolist().index(previous_symbol)
+
+    prev_sym = st.session_state.get("selected_asset_symbol","AAPL")
+    default_idx = 0
+    if prev_sym in filtered["symbol"].tolist():
+        default_idx = filtered["symbol"].tolist().index(prev_sym)
 
     selected_label = st.selectbox(
         "🎛️ Palette de marché",
         labels,
-        index=default_index,
-        help="Sélecteur principal : ouvre la liste ou tape directement pour chercher dans les résultats.",
+        index=default_idx,
     )
     symbol = symbol_by_label.get(selected_label, "AAPL")
-    selected_asset_display_name = name_by_symbol.get(symbol, symbol)
+    display_name = name_by_symbol.get(symbol, symbol)
     st.session_state.selected_asset_symbol = symbol
 
-    if used_popular_fallback:
+    if used_fallback:
         st.markdown(
-            '<div class="notice">Aucun actif exact trouvé. La palette affiche les actifs populaires '
-            "pour garder la navigation fluide.</div>",
-            unsafe_allow_html=True,
+            '<div class="notice">Aucun actif exact trouvé — palette populaire affichée.</div>',
+            unsafe_allow_html=True
         )
 
-    col_launch, col_reset = st.columns([1, 1])
-    with col_launch:
-        if st.button("Lancer la recherche", key="launch_search"):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Lancer la recherche"):
             st.toast(f"Palette verrouillée sur {symbol}", icon="🎛️")
-    with col_reset:
-        st.button("Réinitialiser la recherche", key="reset_asset_search", on_click=reset_asset_search)
+    with col2:
+        st.button("Réinitialiser la recherche", on_click=reset_asset_search)
 
-    scanner_clicked = st.button("⚡ Scanner l’actif", key="scan_asset")
-    if scanner_clicked:
-        st.toast(f"Scan néon lancé pour {symbol}", icon="⚡")
+    if st.button("⚡ Scanner l'actif"):
+        st.toast(f"Scan lancé pour {symbol}", icon="⚡")
 
     st.markdown("---")
-    st.caption(f"Catalogue chargé : {len(catalog)} actifs · affichés : {len(filtered)}")
-    st.caption("Historique cache : 2h · Catalogue : 24h")
-    st.caption("Sons : synthèse locale Web Audio, activés après interaction utilisateur")
 
+    # Live price in sidebar
+    is_crypto = symbol.endswith("-USD")
+    live_data = None
 
+    if is_crypto:
+        live_data = get_live_crypto_coingecko(symbol)
+    else:
+        live_data = get_live_price_finnhub(symbol)
+
+    if live_data and live_data.get("price", 0) > 0:
+        price_live = live_data["price"]
+        chg = live_data.get("change_pct", 0) or 0
+        arrow = "▲" if chg >= 0 else "▼"
+        color = "#00ff41" if chg >= 0 else "#fb365c"
+        st.markdown(
+            f'<div style="text-align:center;padding:10px">'
+            f'<div style="color:#94a3b8;font-size:10px;letter-spacing:2px;font-family:Courier New">PRIX LIVE</div>'
+            f'<div style="color:#f8fafc;font-size:22px;font-weight:900">{price_live:,.2f}</div>'
+            f'<div style="color:{color};font-size:14px">{arrow} {abs(chg):.2f}%</div>'
+            f'<span class="live-badge">● LIVE</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.caption(f"📡 {symbol} — données live indisponibles")
+
+    st.markdown("---")
+    st.caption(f"📊 {len(catalog):,} actifs chargés")
+    st.caption(f"🌍 Finnhub + CoinGecko + Yahoo Finance")
+    st.caption("⏱ Live: 30s · Historique: 5min")
+
+# ============================================================
+# AUDIO
+# ============================================================
+render_audio_system(display_name, symbol)
+
+# ============================================================
+# MAIN DATA
+# ============================================================
 hist = get_history(symbol)
 info = get_info(symbol)
 close = get_close_series(hist)
 data_available = not close.empty
-history_is_fallback = bool(getattr(hist, "attrs", {}).get("is_fallback", False))
+is_fallback = bool(getattr(hist, "attrs", {}).get("is_fallback", False))
 selected_asset = ASSET_METADATA.get(symbol, {})
 
 name = info.get("longName") or info.get("shortName") or selected_asset.get("name") or symbol
-voice_asset_name = selected_asset_display_name or selected_asset.get("name") or name or symbol
-sector = info.get("sector", "N/D")
-industry = info.get("industry", "N/D")
-country = info.get("country", "N/D")
+sector = info.get("sector","N/D")
+industry = info.get("industry","N/D")
+country = info.get("country","N/D")
 currency = info.get("currency") or fallback_currency(symbol)
-asset_type = info.get("quoteType") or selected_asset.get("category") or "N/D"
-price = float(close.iloc[-1]) if data_available else None
-previous = float(close.iloc[-2]) if len(close) > 1 else price
-change = ((price - previous) / previous) * 100 if price is not None and previous else None
 
+# Use live price if available, else use history
+if live_data and live_data.get("price",0) > 0:
+    price = float(live_data["price"])
+    change = float(live_data.get("change_pct", 0) or 0)
+elif data_available:
+    price = float(close.iloc[-1])
+    prev = float(close.iloc[-2]) if len(close) > 1 else price
+    change = ((price - prev) / prev * 100) if prev else 0
+else:
+    price = None
+    change = None
 
-render_analysis_audio_layer(voice_asset_name, symbol)
-
-
+# ============================================================
+# HEADER
+# ============================================================
 st.markdown('<div class="neon-title">📈 Stock Insight Neon Terminal</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="terminal-line">MODE DETECTIVE FINANCIER · PLUIE SYNTHETIQUE · DONNEES PUBLIQUES · '
-    f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</div>",
-    unsafe_allow_html=True,
+    f'<div class="terminal-line">MODE DETECTIVE FINANCIER · PLUIE SYNTHETIQUE · '
+    f'{datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")} · '
+    f'{"🔴 LIVE" if live_data else "📊 HISTORIQUE"}</div>',
+    unsafe_allow_html=True
 )
 st.markdown(
-    '<div class="notice">⚠️ Analyse éducative générée depuis des données publiques. '
-    "Aucun conseil financier. Aucun abonnement API obligatoire.</div>",
-    unsafe_allow_html=True,
+    '<div class="notice">⚠️ Analyse éducative — données publiques. Aucun conseil financier. Aucune API payante.</div>',
+    unsafe_allow_html=True
 )
 
 st.title(name)
 st.caption(f"{symbol} · {sector} · {industry} · {country}")
 
-if not data_available:
-    unavailable_box()
-elif history_is_fallback:
+if is_fallback:
     st.markdown(
-        '<div class="notice">Mode continuité activé : Yahoo Finance est indisponible ou incomplet pour cet actif. '
-        "L'interface reste utilisable avec une série locale indicative, sans bloquer l'application.</div>",
-        unsafe_allow_html=True,
+        '<div class="notice">Mode continuité : données Yahoo Finance indisponibles. '
+        'Série indicative locale affichée.</div>',
+        unsafe_allow_html=True
     )
 
-tabs = st.tabs(
-    [
-        "🏠 Accueil",
-        "🌍 Marché",
-        "📈 Performance",
-        "📊 Ratios",
-        "⚠️ Risque",
-        "🧠 Résumé",
-        "🔥 Heatmap",
-        "🌐 TradingView",
-        "⭐ Watchlist",
-    ]
-)
+# ============================================================
+# TABS
+# ============================================================
+tabs = st.tabs([
+    "🏠 Accueil",
+    "🌍 Marché",
+    "📈 Performance",
+    "📊 Ratios",
+    "⚠️ Risque",
+    "🧠 Résumé",
+    "🔥 Heatmap",
+    "🌐 TradingView",
+    "⭐ Watchlist",
+])
 
+# ---- TAB 0 — ACCUEIL ----
 with tabs[0]:
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        kpi_card("Prix", price_line(price, currency) if price is not None else "N/D")
+        kpi_card("Prix", price_line(price, currency) if price else "N/D")
     with c2:
-        change_text = safe_number(change, 2, "%")
-        change_tone = "kpi-good" if change is not None and change >= 0 else "kpi-bad"
-        kpi_card("Variation jour", change_text, change_tone if change is not None else "")
+        tone = "kpi-good" if change and change >= 0 else "kpi-bad"
+        arrow = "▲" if change and change >= 0 else "▼"
+        kpi_card("Variation", f"{arrow} {abs(change):.2f}%" if change is not None else "N/D", tone)
     with c3:
         kpi_card("Market Cap", money(info.get("marketCap")))
     with c4:
         kpi_card("Beta", safe_number(info.get("beta"), 2))
+
+    if live_data:
+        st.markdown('<span class="live-badge">● DONNÉES LIVE</span>', unsafe_allow_html=True)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("🏢 Fiche entreprise")
@@ -1905,325 +1498,449 @@ with tabs[0]:
     if info.get("website"):
         st.markdown(f"[🌐 Site officiel]({info.get('website')})")
     if info.get("longBusinessSummary"):
-        st.markdown("**Briefing nocturne :**")
-        st.write(str(info.get("longBusinessSummary"))[:900] + "...")
+        st.markdown("**Description :**")
+        st.write(str(info.get("longBusinessSummary",""))[:800] + "...")
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ---- TAB 1 — MARCHÉ ----
 with tabs[1]:
     st.subheader("🌍 Marché")
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f"**Type :** {asset_type}")
+    st.write(f"**Type :** {info.get('quoteType','N/D')}")
     st.write(f"**Devise :** {currency}")
-    st.write(f"**Exchange :** {info.get('exchange', 'N/D')}")
-    st.write(f"**Fuseau marché :** {info.get('exchangeTimezoneName', 'N/D')}")
-    st.write(f"**Volume :** {format_int(info.get('volume'))}")
-    st.write(f"**Volume moyen :** {format_int(info.get('averageVolume'))}")
-    st.write(f"**Ouverture :** {price_line(info.get('open'), currency)}")
-    st.write(f"**Plus haut jour :** {price_line(info.get('dayHigh'), currency)}")
-    st.write(f"**Plus bas jour :** {price_line(info.get('dayLow'), currency)}")
-    st.write(f"**52 semaines haut / bas :** {price_line(info.get('fiftyTwoWeekHigh'), currency)} / {price_line(info.get('fiftyTwoWeekLow'), currency)}")
+    st.write(f"**Exchange :** {info.get('exchange','N/D')}")
+    st.write(f"**Fuseau marché :** {info.get('exchangeTimezoneName','N/D')}")
+
+    if live_data:
+        st.write(f"**Prix live :** {price_line(live_data.get('price'), currency)}")
+        st.write(f"**Variation 24h :** {safe_number(live_data.get('change_pct'), 2, '%')}")
+        if live_data.get("high"):
+            st.write(f"**Haut 24h :** {price_line(live_data.get('high'), currency)}")
+        if live_data.get("low"):
+            st.write(f"**Bas 24h :** {price_line(live_data.get('low'), currency)}")
+        if live_data.get("volume"):
+            st.write(f"**Volume 24h :** {money(live_data.get('volume'))}")
+        if live_data.get("market_cap"):
+            st.write(f"**Market Cap live :** {money(live_data.get('market_cap'))}")
+    else:
+        st.write(f"**Volume :** {format_int(info.get('volume'))}")
+        st.write(f"**Volume moyen :** {format_int(info.get('averageVolume'))}")
+        st.write(f"**Ouverture :** {price_line(info.get('open'), currency)}")
+        st.write(f"**Plus haut jour :** {price_line(info.get('dayHigh'), currency)}")
+        st.write(f"**Plus bas jour :** {price_line(info.get('dayLow'), currency)}")
+
+    st.write(f"**52 sem. haut/bas :** {price_line(info.get('fiftyTwoWeekHigh'), currency)} / {price_line(info.get('fiftyTwoWeekLow'), currency)}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    if data_available:
-        market_df = pd.DataFrame(
-            {
-                "Signal": ["Dernier prix", "Variation jour", "Début période", "Fin période"],
-                "Valeur": [
-                    price_line(price, currency),
-                    safe_number(change, 2, "%"),
-                    price_line(close.iloc[0], currency),
-                    price_line(close.iloc[-1], currency),
-                ],
-            }
-        )
-        st.dataframe(market_df, use_container_width=True, hide_index=True)
-    else:
-        unavailable_box("Données de marché temporairement indisponibles")
-
+# ---- TAB 2 — PERFORMANCE ----
 with tabs[2]:
     st.subheader("📈 Performance holographique")
-    if data_available and {"Open", "High", "Low", "Close"}.issubset(hist.columns):
+
+    period_choice = st.radio(
+        "Période",
+        ["1mo", "3mo", "6mo", "1y", "2y"],
+        horizontal=True,
+        index=2,
+        label_visibility="collapsed"
+    )
+
+    hist_p = get_history(symbol, period_choice)
+
+    if not hist_p.empty and {"Open","High","Low","Close"}.issubset(hist_p.columns):
+        close_p = get_close_series(hist_p)
+
         fig = go.Figure()
-        fig.add_trace(
-            go.Candlestick(
-                x=hist.index,
-                open=hist["Open"],
-                high=hist["High"],
-                low=hist["Low"],
-                close=hist["Close"],
-                increasing_line_color="#22d3ee",
-                decreasing_line_color="#fb365c",
-                name="Prix",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=close.tail(90).index,
-                y=close.tail(90).rolling(20).mean(),
+
+        # Candlestick
+        fig.add_trace(go.Candlestick(
+            x=hist_p.index,
+            open=hist_p["Open"].squeeze(),
+            high=hist_p["High"].squeeze(),
+            low=hist_p["Low"].squeeze(),
+            close=hist_p["Close"].squeeze(),
+            increasing_line_color="#22d3ee",
+            decreasing_line_color="#fb365c",
+            increasing_fillcolor="rgba(34,211,238,.25)",
+            decreasing_fillcolor="rgba(251,54,92,.25)",
+            name="Prix"
+        ))
+
+        # MA20
+        if len(close_p) >= 20:
+            fig.add_trace(go.Scatter(
+                x=hist_p.index,
+                y=close_p.rolling(20).mean(),
                 mode="lines",
-                line=dict(color="#a855f7", width=2),
-                name="Moyenne 20",
-            )
-        )
+                line=dict(color="rgba(168,85,247,.8)", width=1.5),
+                name="MA 20"
+            ))
+
+        # MA50
+        if len(close_p) >= 50:
+            fig.add_trace(go.Scatter(
+                x=hist_p.index,
+                y=close_p.rolling(50).mean(),
+                mode="lines",
+                line=dict(color="rgba(244,114,182,.8)", width=1.5),
+                name="MA 50"
+            ))
+
+        # Bollinger Bands
+        if len(close_p) >= 20:
+            ma = close_p.rolling(20).mean()
+            std = close_p.rolling(20).std()
+            fig.add_trace(go.Scatter(
+                x=hist_p.index, y=ma + 2*std,
+                mode="lines",
+                line=dict(color="rgba(251,179,0,.3)", width=1, dash="dash"),
+                showlegend=False, name="BB+"
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist_p.index, y=ma - 2*std,
+                mode="lines",
+                line=dict(color="rgba(251,179,0,.3)", width=1, dash="dash"),
+                fill="tonexty",
+                fillcolor="rgba(251,179,0,.04)",
+                showlegend=False, name="BB-"
+            ))
+
+        # Volume
+        if "Volume" in hist_p.columns:
+            fig.add_trace(go.Bar(
+                x=hist_p.index,
+                y=hist_p["Volume"].squeeze(),
+                name="Volume",
+                marker_color="rgba(34,211,238,.12)",
+                yaxis="y2"
+            ))
+
         fig.update_layout(
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(2,6,23,.85)",
-            height=560,
-            dragmode=False,
+            height=580,
             xaxis_rangeslider_visible=False,
-            margin=dict(l=10, r=10, t=30, b=10),
-            font=dict(color="#e5e7eb"),
+            dragmode=False,
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="rgba(34,211,238,.7)")),
+            xaxis=dict(showgrid=True, gridcolor="rgba(34,211,238,.06)", fixedrange=True),
+            yaxis=dict(showgrid=True, gridcolor="rgba(34,211,238,.06)", fixedrange=True, side="right"),
+            yaxis2=dict(overlaying="y", side="left", showgrid=False, fixedrange=True),
+            margin=dict(l=0, r=60, t=30, b=0)
         )
-        fig.update_xaxes(
-            gridcolor="rgba(34,211,238,.10)",
-            fixedrange=True,
-            range=[hist.index.min(), hist.index.max()],
-        )
-        fig.update_yaxes(gridcolor="rgba(34,211,238,.10)", fixedrange=True)
         st.plotly_chart(fig, use_container_width=True, config=TOUCH_STABLE_PLOTLY_CONFIG)
 
-        perf = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100 if close.iloc[0] else 0
+        perf = ((close_p.iloc[-1] - close_p.iloc[0]) / close_p.iloc[0] * 100) if close_p.iloc[0] else 0
         st.markdown(
-            f'<span class="mini-chip">Performance 6 mois : {perf:.2f}%</span>'
-            f'<span class="mini-chip">Points historiques : {len(close)}</span>',
-            unsafe_allow_html=True,
+            f'<span class="mini-chip">Performance : {perf:.2f}%</span>'
+            f'<span class="mini-chip">Points : {len(close_p)}</span>',
+            unsafe_allow_html=True
         )
     else:
         unavailable_box("Graphique temporairement indisponible")
 
+# ---- TAB 3 — RATIOS ----
 with tabs[3]:
-    st.subheader("📊 Ratios")
-    r1, r2, r3 = st.columns(3)
-    with r1:
-        kpi_card("P/E", safe_number(info.get("trailingPE"), 2))
-    with r2:
-        kpi_card("Forward P/E", safe_number(info.get("forwardPE"), 2))
-    with r3:
-        dividend = info.get("dividendYield")
-        dividend_text = safe_number(dividend * 100, 2, "%") if isinstance(dividend, (int, float)) else "N/D"
-        kpi_card("Dividend Yield", dividend_text)
-
-    r4, r5, r6 = st.columns(3)
-    with r4:
-        kpi_card("Price / Book", safe_number(info.get("priceToBook"), 2))
-    with r5:
-        kpi_card("Marge profit", safe_number((info.get("profitMargins") or 0) * 100, 2, "%") if info.get("profitMargins") is not None else "N/D")
-    with r6:
-        kpi_card("Dette / Equity", safe_number(info.get("debtToEquity"), 2))
+    st.subheader("📊 Ratios Financiers")
+    cols = st.columns(3)
+    ratios = [
+        ("P/E Ratio", safe_number(info.get("trailingPE"), 2)),
+        ("Forward P/E", safe_number(info.get("forwardPE"), 2)),
+        ("PEG Ratio", safe_number(info.get("pegRatio"), 2)),
+        ("P/B Ratio", safe_number(info.get("priceToBook"), 2)),
+        ("P/S Ratio", safe_number(info.get("priceToSalesTrailing12Months"), 2)),
+        ("EV/EBITDA", safe_number(info.get("enterpriseToEbitda"), 2)),
+        ("Dividend Yield", safe_number((info.get("dividendYield") or 0)*100, 2, "%")),
+        ("Payout Ratio", safe_number(info.get("payoutRatio"), 2)),
+        ("ROE", safe_number((info.get("returnOnEquity") or 0)*100, 2, "%")),
+        ("ROA", safe_number((info.get("returnOnAssets") or 0)*100, 2, "%")),
+        ("Profit Margin", safe_number((info.get("profitMargins") or 0)*100, 2, "%")),
+        ("Debt/Equity", safe_number(info.get("debtToEquity"), 2)),
+    ]
+    for i, (label, val) in enumerate(ratios):
+        cols[i % 3].markdown(
+            f'<div class="kpi" style="margin-bottom:12px">'
+            f'<div class="kpi-title">{label}</div>'
+            f'<div class="kpi-value" style="font-size:20px">{val}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write(f"**Chiffre d'affaires :** {money(info.get('totalRevenue'))}")
     st.write(f"**EBITDA :** {money(info.get('ebitda'))}")
     st.write(f"**Cash total :** {money(info.get('totalCash'))}")
     st.write(f"**Dette totale :** {money(info.get('totalDebt'))}")
-    st.write(f"**Recommandation moyenne Yahoo :** {info.get('recommendationKey', 'N/D')}")
+    st.write(f"**Recommandation :** {info.get('recommendationKey','N/D')}")
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ---- TAB 4 — RISQUE ----
 with tabs[4]:
-    st.subheader("⚠️ Risque")
+    st.subheader("⚠️ Analyse de Risque")
     if data_available and len(close) >= 3:
         returns = close.pct_change().dropna()
-        volatility = returns.std() * (252 ** 0.5) * 100
+        volatility = returns.std() * (252**0.5) * 100
         drawdown = ((close / close.cummax()) - 1).min() * 100
-        downside = returns[returns < 0].std() * (252 ** 0.5) * 100 if not returns[returns < 0].empty else 0
+        sharpe = (returns.mean() / returns.std()) * (252**0.5) if returns.std() > 0 else 0
+        downside = returns[returns < 0].std() * (252**0.5) * 100 if not returns[returns < 0].empty else 0
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Volatilité estimée", f"{volatility:.2f}%")
-        c2.metric("Perte max période", f"{drawdown:.2f}%")
-        c3.metric("Volatilité baissière", f"{downside:.2f}%")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Volatilité", f"{volatility:.1f}%")
+        c2.metric("Perte max", f"{drawdown:.1f}%")
+        c3.metric("Sharpe", f"{sharpe:.2f}")
+        c4.metric("Vol. baissière", f"{downside:.1f}%")
 
-        risk_level = "faible"
-        if volatility >= 55 or drawdown <= -35:
-            risk_level = "élevé"
-        elif volatility >= 30 or drawdown <= -18:
-            risk_level = "modéré"
-
+        risk = "élevé" if volatility >= 55 or drawdown <= -35 else "modéré" if volatility >= 30 or drawdown <= -18 else "faible"
         st.markdown(
-            f'<div class="notice">Niveau de risque détecté : <strong>{risk_level}</strong>. '
-            "Une forte volatilité signifie que le prix peut varier rapidement. Aucun rendement n'est garanti.</div>",
-            unsafe_allow_html=True,
+            f'<div class="notice">Niveau de risque détecté : <strong>{risk}</strong>. '
+            'Aucun rendement garanti.</div>',
+            unsafe_allow_html=True
         )
 
-        fig_risk = go.Figure()
-        fig_risk.add_trace(
-            go.Scatter(
-                x=close.index,
-                y=((close / close.cummax()) - 1) * 100,
-                fill="tozeroy",
-                mode="lines",
-                line=dict(color="#fb365c"),
-                name="Drawdown",
-            )
-        )
-        fig_risk.update_layout(
+        # Drawdown chart
+        fig_dd = go.Figure()
+        fig_dd.add_trace(go.Scatter(
+            x=close.index,
+            y=((close / close.cummax()) - 1) * 100,
+            fill="tozeroy",
+            mode="lines",
+            line=dict(color="#fb365c", width=1.5),
+            fillcolor="rgba(251,54,92,.15)",
+            name="Drawdown %"
+        ))
+        fig_dd.update_layout(
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(2,6,23,.85)",
-            height=360,
-            margin=dict(l=10, r=10, t=20, b=10),
+            height=300,
+            margin=dict(l=0,r=0,t=20,b=0),
+            xaxis=dict(fixedrange=True),
+            yaxis=dict(fixedrange=True)
         )
-        st.plotly_chart(fig_risk, use_container_width=True)
+        st.plotly_chart(fig_dd, use_container_width=True, config=TOUCH_STABLE_PLOTLY_CONFIG)
     else:
-        unavailable_box("Module risque temporairement indisponible")
+        unavailable_box("Module risque indisponible")
 
+# ---- TAB 5 — RÉSUMÉ ----
 with tabs[5]:
     st.subheader("🧠 Résumé IA local")
-    if data_available:
+    if data_available and price:
         ma20 = close.tail(20).mean()
         ma60 = close.tail(60).mean() if len(close) >= 60 else ma20
-        perf = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100 if close.iloc[0] else 0
-        volatility = close.pct_change().std() * (252 ** 0.5) * 100
+        perf = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0] * 100) if close.iloc[0] else 0
+        volatility = close.pct_change().std() * (252**0.5) * 100
+
+        # RSI
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain / loss
+        rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if not rs.empty else 50
 
         score = 0
+        signals = []
+
         if price > ma20:
             score += 1
+            signals.append(("✅", f"Prix ({price:.2f}) > MA20 ({ma20:.2f})", "good"))
+        else:
+            signals.append(("⚠️", f"Prix ({price:.2f}) < MA20 ({ma20:.2f})", "bad"))
+
         if price > ma60:
             score += 1
+            signals.append(("✅", f"Prix > MA60 ({ma60:.2f})", "good"))
+        else:
+            signals.append(("⚠️", f"Prix < MA60 ({ma60:.2f})", "bad"))
+
         if perf > 5:
             score += 1
+            signals.append(("✅", f"Performance 6 mois : +{perf:.1f}%", "good"))
+        else:
+            signals.append(("⚠️", f"Performance 6 mois : {perf:.1f}%", "bad"))
+
         if volatility < 35:
             score += 1
-
-        if score >= 3:
-            reco = "intéressant à surveiller, tendance constructive"
-            reco_class = "kpi-good"
-        elif score == 2:
-            reco = "neutre, à surveiller avec prudence"
-            reco_class = ""
+            signals.append(("✅", f"Volatilité maîtrisée : {volatility:.1f}%", "good"))
         else:
-            reco = "risqué ou faible momentum"
-            reco_class = "kpi-bad"
+            signals.append(("⚠️", f"Forte volatilité : {volatility:.1f}%", "bad"))
 
-        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if 30 < rsi < 70:
+            score += 1
+            signals.append(("✅", f"RSI neutre : {rsi:.0f}", "good"))
+        elif rsi <= 30:
+            signals.append(("🔵", f"RSI survendu : {rsi:.0f} — possible rebond", "neutral"))
+        else:
+            signals.append(("🔴", f"RSI suracheté : {rsi:.0f} — prudence", "bad"))
+
+        verdict = "TENDANCE POSITIVE" if score >= 4 else "SIGNAL NEUTRE" if score >= 2 else "SIGNAL NÉGATIF"
+        vcolor = "#00ff41" if score >= 4 else "#ffb300" if score >= 2 else "#fb365c"
+
         st.markdown(
-            f"""
-### Verdict éducatif : <span class="{reco_class}">**{reco}**</span>
-
-- Prix actuel : **{price_line(price, currency)}**
-- Moyenne 20 jours : **{price_line(ma20, currency)}**
-- Moyenne 60 jours : **{price_line(ma60, currency)}**
-- Performance 6 mois : **{perf:.2f}%**
-- Volatilité estimée : **{volatility:.2f}%**
-- Score terminal : **{score}/4**
-
-⚠️ Ceci n'est pas un conseil financier. Risque de perte en capital.
-""",
-            unsafe_allow_html=True,
+            f'<div class="card">'
+            f'<div style="font-family:Courier New,monospace;font-size:20px;color:{vcolor};'
+            f'text-shadow:0 0 12px {vcolor};margin-bottom:10px">VERDICT : {verdict}</div>'
+            f'<div style="color:rgba(255,255,255,.6);font-size:13px">Score : <strong style="color:{vcolor}">{score}/5</strong></div>'
+            f'</div>',
+            unsafe_allow_html=True
         )
-        st.markdown("</div>", unsafe_allow_html=True)
+
+        for icon, text, tone in signals:
+            color = "#00ff41" if tone == "good" else "#fb365c" if tone == "bad" else "#ffb300"
+            st.markdown(
+                f'<div style="padding:8px 14px;margin:4px 0;border-left:2px solid {color};'
+                f'background:rgba(0,0,0,.3);border-radius:0 8px 8px 0;font-size:13px;color:{color}">'
+                f'{icon} {text}</div>',
+                unsafe_allow_html=True
+            )
+
+        st.warning("⚠️ Analyse éducative uniquement. Pas de conseil financier. Risque de perte en capital.")
     else:
-        unavailable_box("Résumé temporairement indisponible")
+        unavailable_box("Résumé indisponible")
 
+# ---- TAB 6 — HEATMAP ----
 with tabs[6]:
-    st.subheader("🔥 Heatmap néon")
-    st.caption("Heatmap volontairement limitée pour réduire les risques de rate limit Yahoo Finance.")
+    st.subheader("🔥 Heatmap Néon")
 
-    heatmap_symbols = [
-        "AAPL",
-        "MSFT",
-        "NVDA",
-        "TSLA",
-        "AMZN",
-        "META",
-        "GOOGL",
-        "BTC-USD",
-    ]
+    hm_choice = st.radio(
+        "Catégorie heatmap",
+        ["Tech US", "Crypto Top 20", "Europe CAC", "Indices mondiaux", "Matières premières"],
+        horizontal=True
+    )
+
+    hm_map = {
+        "Tech US": [
+            ("AAPL","Apple"),("MSFT","Microsoft"),("NVDA","Nvidia"),
+            ("GOOGL","Google"),("META","Meta"),("AMZN","Amazon"),
+            ("TSLA","Tesla"),("AMD","AMD"),("AVGO","Broadcom"),
+            ("ORCL","Oracle"),("CRM","Salesforce"),("ADBE","Adobe"),
+        ],
+        "Crypto Top 20": [
+            ("BTC-USD","Bitcoin"),("ETH-USD","Ethereum"),("BNB-USD","BNB"),
+            ("SOL-USD","Solana"),("XRP-USD","XRP"),("DOGE-USD","Dogecoin"),
+            ("ADA-USD","Cardano"),("AVAX-USD","Avalanche"),("LINK-USD","Chainlink"),
+            ("DOT-USD","Polkadot"),("MATIC-USD","Polygon"),("LTC-USD","Litecoin"),
+            ("ATOM-USD","Cosmos"),("UNI-USD","Uniswap"),("APT-USD","Aptos"),
+            ("ARB-USD","Arbitrum"),("OP-USD","Optimism"),("INJ-USD","Injective"),
+            ("SUI-USD","Sui"),("NEAR-USD","Near"),
+        ],
+        "Europe CAC": [
+            ("MC.PA","LVMH"),("RMS.PA","Hermès"),("AIR.PA","Airbus"),
+            ("TTE.PA","TotalEnergies"),("SU.PA","Schneider"),("OR.PA","L'Oréal"),
+            ("SAN.PA","Sanofi"),("BNP.PA","BNP"),("SAF.PA","Safran"),
+            ("DSY.PA","Dassault"),("KER.PA","Kering"),("CS.PA","AXA"),
+        ],
+        "Indices mondiaux": [
+            ("^GSPC","S&P500"),("^NDX","Nasdaq100"),("^DJI","DowJones"),
+            ("^FCHI","CAC40"),("^GDAXI","DAX"),("^FTSE","FTSE100"),
+            ("^N225","Nikkei"),("^HSI","HangSeng"),("^STOXX50E","EuroStoxx"),
+            ("^RUT","Russell2000"),("^AXJO","ASX200"),("^BSESN","Sensex"),
+        ],
+        "Matières premières": [
+            ("GC=F","Or"),("SI=F","Argent"),("CL=F","Oil WTI"),
+            ("BZ=F","Brent"),("NG=F","Gaz"),("HG=F","Cuivre"),
+            ("ZC=F","Maïs"),("ZW=F","Blé"),("PL=F","Platine"),
+        ],
+    }
+
     perf_rows = []
-
-    for heat_symbol in heatmap_symbols:
-        try:
-            heat_hist = get_history(heat_symbol)
-            heat_close = get_close_series(heat_hist)
-            if len(heat_close) >= 2 and heat_close.iloc[0]:
-                performance = ((heat_close.iloc[-1] - heat_close.iloc[0]) / heat_close.iloc[0]) * 100
-                perf_rows.append({"symbol": heat_symbol, "performance": performance})
-        except Exception:
-            continue
+    with st.spinner("Chargement heatmap..."):
+        for sym, label in hm_map.get(hm_choice, []):
+            try:
+                h = get_history(sym, "1mo")
+                c = get_close_series(h)
+                if len(c) >= 2 and c.iloc[0]:
+                    p = float((c.iloc[-1] - c.iloc[0]) / c.iloc[0] * 100)
+                    perf_rows.append({"label": label, "symbol": sym, "perf": round(p, 2)})
+            except Exception:
+                pass
 
     if perf_rows:
         dfp = pd.DataFrame(perf_rows)
-        fig = px.treemap(
+        fig_hm = px.treemap(
             dfp,
-            path=["symbol"],
-            values=dfp["performance"].abs() + 1,
-            color="performance",
-            color_continuous_scale=["#fb365c", "#111827", "#22d3ee"],
-            hover_data={"performance": ":.2f"},
+            path=["label"],
+            values=dfp["perf"].abs() + 1,
+            color="perf",
+            color_continuous_scale=[
+                [0,"#fb365c"],[0.3,"#4a0000"],
+                [0.5,"#0a0f1e"],[0.7,"#003320"],
+                [1,"#00ff41"]
+            ],
+            color_continuous_midpoint=0,
+            hover_data={"perf":":.2f"}
         )
-        fig.update_traces(
-            texttemplate="<b>%{label}</b><br>%{customdata[0]:.2f}%",
-            marker=dict(line=dict(color="rgba(34,211,238,.45)", width=1)),
+        fig_hm.update_traces(
+            textfont=dict(family="Courier New", size=13, color="white"),
+            texttemplate="<b>%{label}</b><br>%{customdata[0]:.2f}%"
         )
-        fig.update_layout(
+        fig_hm.update_layout(
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(2,6,23,.85)",
             height=520,
-            margin=dict(l=10, r=10, t=20, b=10),
+            margin=dict(l=0,r=0,t=20,b=0)
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig_hm, use_container_width=True, config=TOUCH_STABLE_PLOTLY_CONFIG)
     else:
         unavailable_box("Heatmap temporairement indisponible")
 
+# ---- TAB 7 — TRADINGVIEW ----
 with tabs[7]:
-    st.subheader("🌐 TradingView intégré")
+    st.subheader("🌐 TradingView Live")
     st.markdown(
-        '<div class="notice">Module externe TradingView affiché uniquement pour visualisation. '
-        "Les données principales de l'application restent basées sur yfinance.</div>",
-        unsafe_allow_html=True,
+        '<div class="notice">Graphique TradingView intégré pour visualisation complémentaire.</div>',
+        unsafe_allow_html=True
     )
     url = f"https://s.tradingview.com/widgetembed/?symbol={tv_symbol(symbol)}&interval=D&theme=dark&style=1&locale=fr"
     components.iframe(url, height=620, scrolling=False)
 
+# ---- TAB 8 — WATCHLIST ----
 with tabs[8]:
-    st.subheader("⭐ Watchlist futuriste")
+    st.subheader("⭐ Watchlist")
 
-    col_add, col_clear = st.columns([2, 1])
+    col_add, col_clear = st.columns([3, 1])
     with col_add:
-        if st.button("Ajouter à la watchlist", key="add_watchlist"):
+        if st.button(f"➕ Ajouter {symbol}"):
             if symbol not in st.session_state.watchlist:
                 st.session_state.watchlist.append(symbol)
-                st.toast(f"{symbol} ajouté à la watchlist", icon="⭐")
+                st.toast(f"✅ {symbol} ajouté", icon="⭐")
             else:
-                st.toast(f"{symbol} est déjà dans la watchlist", icon="☑️")
+                st.toast(f"Déjà dans la watchlist", icon="☑️")
     with col_clear:
-        if st.button("Effacer la watchlist", key="clear_watchlist"):
+        if st.button("🗑️ Vider"):
             st.session_state.watchlist = []
-            st.toast("Watchlist effacée", icon="🧹")
 
     if st.session_state.watchlist:
-        watch_rows = []
-        for watch_symbol in st.session_state.watchlist:
-            watch_hist = get_history(watch_symbol)
-            watch_close = get_close_series(watch_hist)
-            if len(watch_close) >= 2:
-                watch_price = watch_close.iloc[-1]
-                watch_change = ((watch_close.iloc[-1] - watch_close.iloc[-2]) / watch_close.iloc[-2]) * 100 if watch_close.iloc[-2] else 0
-                watch_rows.append(
-                    {
-                        "Symbole": watch_symbol,
-                        "Dernier prix": price_line(watch_price, currency),
-                        "Variation jour": f"{watch_change:.2f}%",
-                    }
-                )
-            else:
-                watch_rows.append(
-                    {
-                        "Symbole": watch_symbol,
-                        "Dernier prix": "Données temporairement indisponibles",
-                        "Variation jour": "N/D",
-                    }
-                )
-        st.dataframe(pd.DataFrame(watch_rows), use_container_width=True, hide_index=True)
+        wl_rows = []
+        for ws in st.session_state.watchlist:
+            try:
+                wh = get_history(ws, "5d")
+                wc = get_close_series(wh)
+                if len(wc) >= 2:
+                    wp = float(wc.iloc[-1])
+                    wch = ((wc.iloc[-1]-wc.iloc[-2])/wc.iloc[-2]*100) if wc.iloc[-2] else 0
+                    wl_rows.append({
+                        "Symbole": ws,
+                        "Prix": f"{wp:,.2f}",
+                        "Variation": f"{'▲' if wch >= 0 else '▼'} {abs(wch):.2f}%",
+                        "Signal": "🟢 BULL" if wch >= 0 else "🔴 BEAR"
+                    })
+                else:
+                    wl_rows.append({"Symbole": ws, "Prix": "N/D", "Variation": "N/D", "Signal": "—"})
+            except Exception:
+                wl_rows.append({"Symbole": ws, "Prix": "N/D", "Variation": "N/D", "Signal": "—"})
+
+        st.dataframe(pd.DataFrame(wl_rows), use_container_width=True, hide_index=True)
     else:
         st.markdown(
-            '<div class="data-missing">Aucun actif dans la watchlist. Ajoute un symbole pour construire ton tableau de bord nocturne.</div>',
-            unsafe_allow_html=True,
+            '<div class="data-missing">Watchlist vide. Ajoutez un actif pour commencer.</div>',
+            unsafe_allow_html=True
         )
 
+# ============================================================
+# FOOTER
+# ============================================================
 st.markdown(
-    '<div class="footer">Stock Insight Neon — données publiques Yahoo Finance via yfinance, sans clé API payante. '
-    "Ambiance synthétique Web Audio API et voix SpeechSynthesis locales, sans fichier externe.</div>",
-    unsafe_allow_html=True,
+    '<div class="footer">Stock Insight Neon Terminal — '
+    'Finnhub + CoinGecko + Yahoo Finance — Sans API payante — '
+    'Pas de conseil financier — Risque de perte en capital</div>',
+    unsafe_allow_html=True
 )
